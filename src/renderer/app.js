@@ -549,7 +549,7 @@ $('launchAivis').addEventListener('click', async () => {
   log('Asked macOS to launch AivisSpeech.');
 });
 $('testVoice').addEventListener('click', async () => {
-  try { await saveSettings(); await window.voiceBridge.testVoice('VoiceBridge is ready.'); }
+  try { await saveSettings(); await window.voiceBridge.testVoice(''); }
   catch (err) { log(err.message, 'error'); }
 });
 $('connectButton').addEventListener('click', async () => {
