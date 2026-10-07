@@ -25,10 +25,9 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build and publish macOS release
+      - name: Build macOS artifacts
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -40,11 +39,31 @@ jobs:
             export CSC_IDENTITY_AUTO_DISCOVERY=false
             unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
             npm run build:hotkey
-            npx electron-builder --mac --arm64 --publish always -c.mac.notarize=false
+            npx electron-builder --mac --arm64 --publish never -c.mac.notarize=false
           else
             echo "Developer ID certificate configured; signing/notarization enabled."
-            npm run release:mac
+            npm run build:hotkey
+            npx electron-builder --mac --arm64 --publish never
           fi
+
+      - name: Publish one GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          files=(
+            dist/*.dmg
+            dist/*.dmg.blockmap
+            dist/*-mac.zip
+            dist/*-mac.zip.blockmap
+            dist/latest-mac.yml
+          )
+          if (( ${#files[@]} == 0 )); then
+            echo "No release artifacts found."
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" "${files[@]}"             --repo "$GITHUB_REPOSITORY"             --title "VoiceBridge ${GITHUB_REF_NAME#v}"             --generate-notes
 
       - name: Show release artifacts
         if: always()
