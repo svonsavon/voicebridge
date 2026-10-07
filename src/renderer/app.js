@@ -76,7 +76,10 @@ async function loadSettings() {
   $('guildId').value = settings.guildId || '';
   $('channelId').value = settings.channelId || '';
   if ($('microphoneDevice')) $('microphoneDevice').value = settings.microphoneDeviceId || '';
-  $('whisperLanguage').value = settings.whisperLanguage || 'en';
+  $('inputLanguage').value = settings.inputLanguage || settings.whisperLanguage || 'en';
+  $('outputLanguage').value = settings.outputLanguage || 'same';
+  $('ttsEngine').value = settings.ttsEngine || 'aivis';
+  $('qwenVoice').value = settings.qwenVoice || 'Ryan';
   $('speechSilenceMs').value = settings.speechSilenceMs || 650;
   $('speechMinMs').value = settings.speechMinMs || 280;
   $('vadSensitivity').value = settings.vadSensitivity || 2.4;
@@ -88,7 +91,11 @@ async function saveSettings() {
     guildId: $('guildId').value.trim(),
     channelId: $('channelId').value.trim(),
     microphoneDeviceId: $('microphoneDevice')?.value || '',
-    whisperLanguage: $('whisperLanguage').value,
+    inputLanguage: $('inputLanguage').value,
+    outputLanguage: $('outputLanguage').value,
+    whisperLanguage: $('inputLanguage').value,
+    ttsEngine: $('ttsEngine').value,
+    qwenVoice: $('qwenVoice').value,
     aivisSpeakerId: $('speakerId').value,
     speechSilenceMs: Number($('speechSilenceMs').value || 650),
     speechMinMs: Number($('speechMinMs').value || 280),
@@ -99,6 +106,14 @@ async function saveSettings() {
   settings = await window.voiceBridge.saveSettings(patch);
   $('discordToken').value = '';
   log('Settings saved.', 'ok');
+}
+
+function updateVoiceEngineUi() {
+  const engine = $('ttsEngine')?.value || 'aivis';
+  const qwen = $('qwenVoice')?.closest('label');
+  const aivis = $('speakerId')?.closest('label');
+  if (qwen) qwen.classList.toggle('hidden', engine !== 'qwen');
+  if (aivis) aivis.classList.toggle('hidden', engine !== 'aivis');
 }
 
 async function refreshMicrophones({ requestPermission = false } = {}) {
@@ -523,6 +538,10 @@ $('microphoneDevice')?.addEventListener('change', async () => {
   log('Microphone selected: ' + label + '. Restart listening to apply the change.', 'ok');
 });
 
+$('ttsEngine')?.addEventListener('change', () => {
+  updateVoiceEngineUi();
+});
+
 $('saveButton').addEventListener('click', saveSettings);
 $('refreshVoices').addEventListener('click', refreshVoices);
 $('launchAivis').addEventListener('click', async () => {
@@ -577,6 +596,7 @@ navigator.mediaDevices?.addEventListener?.('devicechange', () => {
   }
   const state = await window.voiceBridge.getState();
   updateMuteUi(state);
+  updateVoiceEngineUi();
   await refreshVoices();
 })();
 
