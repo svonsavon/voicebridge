@@ -25,6 +25,7 @@ let peakRms = 0;
 let noiseFloor = 0.0015;
 let hotFrames = 0;
 let pcmFramesSeen = 0;
+let processedFramesSeen = 0;
 let remoteMuted = false;
 let localHotkeyMuted = false;
 
@@ -201,14 +202,24 @@ async function finalizeUtterance() {
 }
 
 function handlePcm(samples, sampleRate = captureSampleRate || 48000) {
-  if (!listening || muted) return;
+  if (!listening) return;
+
   captureSampleRate = sampleRate || captureSampleRate || 48000;
+  pcmFramesSeen += 1;
+
+  if (pcmFramesSeen === 1) {
+    log(`Microphone PCM is flowing at ${captureSampleRate} Hz via ${capturePath}.`, 'ok');
+    if (muted) {
+      log('Microphone audio is arriving, but VoiceBridge is currently muted. Unmute VoiceBridge to process speech.', 'warn');
+    }
+  }
+
+  if (muted) return;
+
+  processedFramesSeen += 1;
   const frameMs = (samples.length / captureSampleRate) * 1000;
   const rms = rmsOf(samples);
   $('meterFill').style.width = `${Math.min(100, rms * 1200)}%`;
-
-  pcmFramesSeen += 1;
-  if (pcmFramesSeen === 1) log(`Microphone PCM is flowing at ${captureSampleRate} Hz via ${capturePath}.`, 'ok');
 
   const sensitivity = Number(settings.vadSensitivity || 2.4);
   const threshold = Math.max(0.0025, noiseFloor * sensitivity);
@@ -348,6 +359,7 @@ async function startListening() {
   captureSampleRate = Number(trackSettings.sampleRate || 48000);
   capturePath = 'starting';
   pcmFramesSeen = 0;
+  processedFramesSeen = 0;
   listening = true;
 
   const directStarted = await startDirectTrackCapture(track);
@@ -410,11 +422,18 @@ async function startListening() {
           ', processorDiscardedFrames=' + (trackProcessor.discardedFrames ?? '?')
         : '';
       log(
-        'No microphone PCM received after 1.5 s ' +
+        'No raw microphone PCM reached VoiceBridge after 1.5 s ' +
         '(capture=' + capturePath +
         ', track=' + track.readyState +
-        ', muted=' + track.muted + extra + ').',
+        ', trackMuted=' + track.muted +
+        ', appMuted=' + muted + extra + ').',
         'error'
+      );
+    } else if (listening && pcmFramesSeen > 0 && processedFramesSeen === 0 && muted) {
+      log(
+        'Raw microphone PCM is healthy (' + pcmFramesSeen +
+        ' frames seen), but VoiceBridge is muted. Unmute the app to enable speech detection.',
+        'warn'
       );
     }
   }, 1500);
@@ -449,6 +468,7 @@ async function stopListening() {
   capturePath = 'none';
   captureSampleRate = 48000;
   pcmFramesSeen = 0;
+  processedFramesSeen = 0;
 
   $('listenButton').textContent = 'Start always listening';
   $('liveBadge').textContent = 'stopped';
