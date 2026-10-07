@@ -352,10 +352,14 @@ async function startListening() {
 async function stopListening() {
   listening = false;
   resetUtterance();
+  try { sourceNode?.disconnect(); } catch {}
   try { workletNode?.disconnect(); } catch {}
+  try { silentGain?.disconnect(); } catch {}
   try { mediaStream?.getTracks().forEach((t) => t.stop()); } catch {}
   try { await audioContext?.close(); } catch {}
+  sourceNode = null;
   workletNode = null;
+  silentGain = null;
   mediaStream = null;
   audioContext = null;
   pcmFramesSeen = 0;
@@ -375,6 +379,22 @@ $('muteButton').addEventListener('click', async () => {
   const result = await window.voiceBridge.setManualMute(!remoteMuted);
   updateMuteUi(result);
 });
+$('refreshMicrophones')?.addEventListener('click', async () => {
+  try {
+    const devices = await refreshMicrophones({ requestPermission: true });
+    log('Found ' + devices.length + ' microphone input' + (devices.length === 1 ? '' : 's') + '.', 'ok');
+  } catch (err) {
+    log('Microphone refresh failed: ' + err.message, 'error');
+  }
+});
+
+$('microphoneDevice')?.addEventListener('change', async () => {
+  const microphoneDeviceId = $('microphoneDevice').value || '';
+  settings = await window.voiceBridge.saveSettings({ microphoneDeviceId });
+  const label = $('microphoneDevice').selectedOptions?.[0]?.textContent || 'System default';
+  log('Microphone selected: ' + label + '. Restart listening to apply the change.', 'ok');
+});
+
 $('saveButton').addEventListener('click', saveSettings);
 $('refreshVoices').addEventListener('click', refreshVoices);
 $('launchAivis').addEventListener('click', async () => {
@@ -417,8 +437,16 @@ window.voiceBridge.onStatus((s) => {
 });
 window.voiceBridge.onMuteState(updateMuteUi);
 
+navigator.mediaDevices?.addEventListener?.('devicechange', () => {
+  refreshMicrophones().catch(() => {});
+});
+
 (async () => {
   await loadSettings();
+  await refreshMicrophones().catch((err) => log('Could not enumerate microphones yet: ' + err.message, 'warn'));
+  if ($('microphoneDevice') && settings.microphoneDeviceId) {
+    $('microphoneDevice').value = settings.microphoneDeviceId;
+  }
   const state = await window.voiceBridge.getState();
   updateMuteUi({ muted: state.muted });
   await refreshVoices();
