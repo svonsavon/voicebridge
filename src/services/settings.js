@@ -5,6 +5,7 @@ const { app, safeStorage } = require('electron');
 const defaults = {
   guildId: '',
   channelId: '',
+  microphoneDeviceId: '',
   whisperLanguage: 'en',
   ttsEngine: 'aivis',
   aivisSpeakerId: '',
