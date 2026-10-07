@@ -30,3 +30,5 @@ input, select { width: 100%; background: #11151d; color: #f5f7fb; border: 1px so
 .log .ok { color: #86e1ac; }
 .log .warn { color: #f2ca7d; }
 @media (max-width: 720px) { .grid.two, .grid.three { grid-template-columns: 1fr; } .hero { grid-template-columns: 1fr 1fr; } .meter { grid-column: 1 / -1; } }
+
+.hidden { display: none !important; }
