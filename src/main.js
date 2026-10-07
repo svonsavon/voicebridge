@@ -10,6 +10,7 @@ const {
 } = require('electron');
 const { loadSettings, saveSettings } = require('./services/settings');
 const whisper = require('./services/whisper');
+const { cleanTranscript } = require('./services/speechFilter');
 const aivis = require('./services/aivis');
 const discordVoice = require('./services/discordVoice');
 const updater = require('./services/updater');
@@ -171,7 +172,12 @@ function registerIpc() {
       if (effectiveMuted()) return { skipped: 'muted' };
       const settings = loadSettings({ includeToken: true });
       status('Transcribing locally…', 'busy');
-      const text = await whisper.transcribe(wavBytes, settings.whisperLanguage || 'en');
+      const rawText = await whisper.transcribe(wavBytes, settings.whisperLanguage || 'en');
+      const filtered = cleanTranscript(rawText);
+      if (filtered.removed.length) {
+        status(`Ignored non-speech: ${filtered.removed.join(', ')}`, 'info');
+      }
+      const text = filtered.text;
       if (!text || text === '[BLANK_AUDIO]') return { text: '', skipped: 'empty' };
       status(`You: ${text}`, 'transcript');
 
