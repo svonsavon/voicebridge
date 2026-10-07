@@ -10,7 +10,8 @@
     "build:hotkey": "bash scripts/build-hotkey.sh",
     "setup:runtime": "bash scripts/setup-whisper.sh",
     "dist:mac": "bash scripts/build-mac.sh",
-    "release:mac": "npm run build:hotkey && electron-builder --mac --arm64 --publish always"
+    "release:mac": "npm run build:hotkey && electron-builder --mac --arm64 --publish always",
+    "setup:qwen": "bash scripts/setup-qwen.sh"
   },
   "dependencies": {
     "@discordjs/voice": "0.19.2",
