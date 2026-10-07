@@ -51,23 +51,59 @@
     </section>
 
     <section>
-      <h2>Local voice</h2>
-      <div class="grid two">
-        <label>AivisSpeech voice/style
-          <select id="speakerId"><option value="">Refresh voices…</option></select>
-        </label>
-        <label>Whisper language
-          <select id="whisperLanguage">
-            <option value="en">English</option>
+      <h2>Language & voice</h2>
+      <div class="grid three">
+        <label>I speak
+          <select id="inputLanguage">
             <option value="auto">Auto detect</option>
+            <option value="en">English</option>
+            <option value="zh">Mandarin Chinese</option>
             <option value="ja">Japanese</option>
           </select>
         </label>
+        <label>Discord hears
+          <select id="outputLanguage">
+            <option value="same">Same as input</option>
+            <option value="en">English</option>
+            <option value="zh">Mandarin Chinese</option>
+            <option value="ja">Japanese</option>
+          </select>
+        </label>
+        <label>Voice engine
+          <select id="ttsEngine">
+            <option value="qwen">Qwen multilingual</option>
+            <option value="aivis">AivisSpeech</option>
+          </select>
+        </label>
       </div>
+
+      <div class="grid two" style="margin-top: 12px;">
+        <label>Qwen voice
+          <select id="qwenVoice">
+            <option value="Ryan">Ryan — English male</option>
+            <option value="Aiden">Aiden — English male</option>
+            <option value="Vivian">Vivian — Chinese female</option>
+            <option value="Serena">Serena — Chinese female</option>
+            <option value="Uncle_Fu">Uncle Fu — Chinese male</option>
+            <option value="Dylan">Dylan — Chinese male</option>
+            <option value="Eric">Eric — Chinese male</option>
+            <option value="Ono_Anna">Ono Anna — Japanese female</option>
+            <option value="Sohee">Sohee — Korean female</option>
+          </select>
+        </label>
+        <label>AivisSpeech voice/style
+          <select id="speakerId"><option value="">Refresh voices…</option></select>
+        </label>
+      </div>
+
+      <div class="hint" style="margin-top: 10px;">
+        Translation runs only when the output language differs from the input. Qwen can speak English, Mandarin, and Japanese with the same selected voice.
+      </div>
+
       <div class="row">
         <button id="refreshVoices">Refresh Aivis voices</button>
         <button id="launchAivis">Launch AivisSpeech</button>
-        <button id="testVoice">Test voice</button>
+        <button id="testVoice">Test selected voice</button>
       </div>
     </section>
 
