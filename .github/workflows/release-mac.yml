@@ -38,6 +38,7 @@ jobs:
           if [[ -z "${CSC_LINK:-}" ]]; then
             echo "No Developer ID certificate configured; building unsigned bootstrap release."
             export CSC_IDENTITY_AUTO_DISCOVERY=false
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
             npm run build:hotkey
             npx electron-builder --mac --arm64 --publish always -c.mac.notarize=false
           else
