@@ -1,0 +1,82 @@
+{
+  "name": "voicebridge",
+  "version": "0.1.4",
+  "description": "Local microphone -> local Whisper -> local expressive TTS -> Discord voice bridge",
+  "main": "src/main.js",
+  "author": "VoiceBridge",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "build:hotkey": "bash scripts/build-hotkey.sh",
+    "setup:runtime": "bash scripts/setup-whisper.sh",
+    "dist:mac": "bash scripts/build-mac.sh",
+    "release:mac": "npm run build:hotkey && electron-builder --mac --arm64 --publish always"
+  },
+  "dependencies": {
+    "@discordjs/voice": "0.19.2",
+    "discord.js": "^14.25.1",
+    "ffmpeg-static": "^5.2.0",
+    "libsodium-wrappers": "^0.7.15",
+    "opusscript": "^0.1.1",
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "electron": "44.5.1",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "local.voicebridge.app",
+    "productName": "VoiceBridge",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**"
+    ],
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/hotkey-helper",
+        "to": "hotkey-helper"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.social-networking",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "VoiceBridge listens locally so it can transcribe your speech and speak synthesized audio in Discord.",
+        "NSInputMonitoringUsageDescription": "VoiceBridge can observe a global hold-to-mute key."
+      },
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "notarize": true
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "svonsavon",
+        "repo": "voicebridge"
+      }
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/svonsavon/voicebridge.git"
+  }
+}

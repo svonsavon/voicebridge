@@ -1,0 +1,32 @@
+:root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #111319; color: #f5f7fb; }
+main { max-width: 900px; margin: 0 auto; padding: 28px; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
+h1 { margin: 0; font-size: 34px; }
+header p { color: #aab2c2; margin: 6px 0 0; }
+section { background: #191d27; border: 1px solid #2a3040; border-radius: 16px; padding: 18px; margin: 14px 0; }
+.hero { display: grid; grid-template-columns: auto auto 1fr; gap: 12px; align-items: center; }
+.hero .hint { grid-column: 1 / -1; color: #aab2c2; font-size: 13px; }
+button, input, select { font: inherit; }
+button { border: 1px solid #394157; background: #252b39; color: white; padding: 10px 14px; border-radius: 10px; cursor: pointer; }
+button:hover { background: #30384a; }
+button.primary { background: #315ee8; border-color: #315ee8; }
+button.secondary.muted, .badge.muted { background: #7a2935; }
+.grid { display: grid; gap: 12px; }
+.grid.two { grid-template-columns: 1fr 1fr; }
+.grid.three { grid-template-columns: repeat(3, 1fr); }
+label { display: grid; gap: 6px; color: #b9c1d0; font-size: 13px; }
+input, select { width: 100%; background: #11151d; color: #f5f7fb; border: 1px solid #343b4d; padding: 10px; border-radius: 8px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.badge { border-radius: 999px; padding: 7px 12px; font-size: 12px; background: #293143; }
+.badge.on { background: #1f6847; }
+.badge.off { background: #4b4f5b; }
+.meter { height: 12px; border-radius: 999px; overflow: hidden; background: #0d1016; min-width: 150px; }
+#meterFill { width: 0%; height: 100%; background: #6c8cff; transition: width .05s linear; }
+.transcript { min-height: 55px; background: #11151d; border-radius: 10px; padding: 12px; font-size: 16px; }
+.log { margin-top: 10px; max-height: 155px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #aeb7c8; }
+.log .error { color: #ff8d9b; }
+.log .ok { color: #86e1ac; }
+.log .warn { color: #f2ca7d; }
+@media (max-width: 720px) { .grid.two, .grid.three { grid-template-columns: 1fr; } .hero { grid-template-columns: 1fr 1fr; } .meter { grid-column: 1 / -1; } }

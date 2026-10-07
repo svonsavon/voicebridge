@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VoiceBridge</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>VoiceBridge</h1>
+        <p>Local mic → local Whisper → local TTS → Discord</p>
+      </div>
+      <div id="liveBadge" class="badge off">stopped</div>
+    </header>
+
+    <section class="hero">
+      <button id="listenButton" class="primary">Start always listening</button>
+      <button id="muteButton" class="secondary">Mute</button>
+      <div class="meter"><div id="meterFill"></div></div>
+      <div class="hint">Hold <strong>F8</strong> to temporarily mute (use <strong>Fn+F8</strong> if your Mac uses media keys). Mic audio stays in memory and goes only to 127.0.0.1.</div>
+    </section>
+
+    <section>
+      <h2>Discord bot</h2>
+      <div class="grid two">
+        <label>Bot token <input id="discordToken" type="password" placeholder="Leave blank to keep saved token" /></label>
+        <label>Server (Guild) ID <input id="guildId" /></label>
+        <label>Voice Channel ID <input id="channelId" /></label>
+      </div>
+      <div class="row">
+        <button id="saveButton">Save settings</button>
+        <button id="connectButton">Connect bot</button>
+        <button id="disconnectButton">Disconnect</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Local voice</h2>
+      <div class="grid two">
+        <label>AivisSpeech voice/style
+          <select id="speakerId"><option value="">Refresh voices…</option></select>
+        </label>
+        <label>Whisper language
+          <select id="whisperLanguage">
+            <option value="en">English</option>
+            <option value="auto">Auto detect</option>
+            <option value="ja">Japanese</option>
+          </select>
+        </label>
+      </div>
+      <div class="row">
+        <button id="refreshVoices">Refresh Aivis voices</button>
+        <button id="launchAivis">Launch AivisSpeech</button>
+        <button id="testVoice">Test voice</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Speech detection</h2>
+      <div class="grid three">
+        <label>Silence ends phrase (ms)<input id="speechSilenceMs" type="number" min="250" max="2000" /></label>
+        <label>Minimum phrase (ms)<input id="speechMinMs" type="number" min="100" max="2000" /></label>
+        <label>VAD sensitivity<input id="vadSensitivity" type="number" step="0.1" min="1.5" max="6" /></label>
+      </div>
+    </section>
+
+    <section id="updatesSection">
+      <h2>Updates</h2>
+      <div id="updateStatus" class="transcript">Checking is ready.</div>
+      <div class="row">
+        <button id="checkUpdates">Check for Updates</button>
+        <button id="downloadUpdate" class="hidden">Download Update</button>
+        <button id="installUpdate" class="hidden">Restart & Update</button>
+        <button id="openRelease" class="hidden">Open Latest Release</button>
+      </div>
+    </section>
+
+<section>
+      <h2>Activity</h2>
+      <div id="transcript" class="transcript">No speech yet.</div>
+      <div id="statusLog" class="log"></div>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

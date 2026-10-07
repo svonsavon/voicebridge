@@ -1,0 +1,5 @@
+node_modules/
+dist/
+build/hotkey-helper
+.DS_Store
+npm-debug.log*
