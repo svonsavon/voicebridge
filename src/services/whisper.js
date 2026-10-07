@@ -113,6 +113,7 @@ async function transcribe(wavBytes, language = 'en') {
   form.append('temperature', '0.0');
   form.append('response_format', 'json');
   form.append('no_timestamps', 'true');
+  form.append('suppress_nst', 'true');
   if (language) form.append('language', language);
 
   const response = await fetch(`${BASE_URL}/inference`, {
