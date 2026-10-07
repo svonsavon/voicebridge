@@ -12,8 +12,7 @@ const defaults = {
   speechSilenceMs: 650,
   speechMinMs: 280,
   speechMaxMs: 12000,
-  vadSensitivity: 2.8,
-  manualMuted: false
+  vadSensitivity: 2.8
 };
 
 function filePath() {
@@ -52,6 +51,7 @@ function loadSettings({ includeToken = false } = {}) {
   const raw = readRaw();
   const settings = { ...defaults, ...raw };
   delete settings.discordTokenEncrypted;
+  delete settings.manualMuted;
   if (includeToken) settings.discordToken = decryptToken(raw.discordTokenEncrypted);
   else settings.discordTokenConfigured = !!raw.discordTokenEncrypted;
   return settings;
