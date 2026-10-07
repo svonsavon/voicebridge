@@ -27,6 +27,8 @@ let hotFrames = 0;
 let pcmFramesSeen = 0;
 let processedFramesSeen = 0;
 let remoteMuted = false;
+let mainHelperMuted = false;
+let mainManualMuted = false;
 let localHotkeyMuted = false;
 
 function log(text, level = 'info') {
@@ -36,15 +38,36 @@ function log(text, level = 'info') {
   $('statusLog').prepend(row);
 }
 
+function updateListeningBadge() {
+  if (!listening) {
+    $('liveBadge').textContent = 'stopped';
+    $('liveBadge').className = 'badge off';
+    return;
+  }
+  if (muted) {
+    $('liveBadge').textContent = 'listening • muted';
+    $('liveBadge').className = 'badge muted';
+    return;
+  }
+  $('liveBadge').textContent = 'always listening';
+  $('liveBadge').className = 'badge on';
+}
+
 function recomputeMuteUi() {
   muted = remoteMuted || localHotkeyMuted;
-  $('muteButton').textContent = muted ? 'Muted' : 'Mute';
+  const f8Muted = mainHelperMuted || localHotkeyMuted;
+  if (f8Muted) $('muteButton').textContent = 'Muted by F8';
+  else if (mainManualMuted || remoteMuted) $('muteButton').textContent = 'Unmute';
+  else $('muteButton').textContent = 'Mute';
   $('muteButton').classList.toggle('muted', muted);
+  updateListeningBadge();
   if (muted) resetUtterance();
 }
 
 function updateMuteUi(state) {
   remoteMuted = !!state.muted;
+  mainHelperMuted = !!state.helperMuted;
+  mainManualMuted = !!state.manualMuted;
   recomputeMuteUi();
 }
 
@@ -439,8 +462,7 @@ async function startListening() {
   }, 1500);
 
   $('listenButton').textContent = 'Stop listening';
-  $('liveBadge').textContent = 'always listening';
-  $('liveBadge').className = 'badge on';
+  updateListeningBadge();
   log('Always-listening microphone capture started locally.', 'ok');
 }
 
@@ -471,8 +493,7 @@ async function stopListening() {
   processedFramesSeen = 0;
 
   $('listenButton').textContent = 'Start always listening';
-  $('liveBadge').textContent = 'stopped';
-  $('liveBadge').className = 'badge off';
+  updateListeningBadge();
   $('meterFill').style.width = '0%';
   log('Microphone capture stopped.');
 }
@@ -555,7 +576,7 @@ navigator.mediaDevices?.addEventListener?.('devicechange', () => {
     $('microphoneDevice').value = settings.microphoneDeviceId;
   }
   const state = await window.voiceBridge.getState();
-  updateMuteUi({ muted: state.muted });
+  updateMuteUi(state);
   await refreshVoices();
 })();
 
