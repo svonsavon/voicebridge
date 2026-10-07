@@ -108,6 +108,29 @@ async function saveSettings() {
   log('Settings saved.', 'ok');
 }
 
+async function saveLiveVoiceSettings() {
+  const patch = {
+    inputLanguage: $('inputLanguage').value,
+    outputLanguage: $('outputLanguage').value,
+    whisperLanguage: $('inputLanguage').value,
+    ttsEngine: $('ttsEngine').value,
+    qwenVoice: $('qwenVoice').value,
+    aivisSpeakerId: $('speakerId').value
+  };
+  settings = await window.voiceBridge.saveSettings(patch);
+
+  const engineLabel = patch.ttsEngine === 'qwen'
+    ? 'Qwen multilingual — ' + patch.qwenVoice
+    : 'AivisSpeech';
+  log(
+    'Voice route updated: ' +
+    patch.inputLanguage + ' → ' +
+    patch.outputLanguage + ' → ' +
+    engineLabel + '.',
+    'ok'
+  );
+}
+
 function updateVoiceEngineUi() {
   const engine = $('ttsEngine')?.value || 'aivis';
   const qwen = $('qwenVoice')?.closest('label');
@@ -538,9 +561,18 @@ $('microphoneDevice')?.addEventListener('change', async () => {
   log('Microphone selected: ' + label + '. Restart listening to apply the change.', 'ok');
 });
 
-$('ttsEngine')?.addEventListener('change', () => {
+$('ttsEngine')?.addEventListener('change', async () => {
   updateVoiceEngineUi();
+  try { await saveLiveVoiceSettings(); }
+  catch (err) { log('Could not save voice engine: ' + err.message, 'error'); }
 });
+
+for (const id of ['inputLanguage', 'outputLanguage', 'qwenVoice', 'speakerId']) {
+  $(id)?.addEventListener('change', async () => {
+    try { await saveLiveVoiceSettings(); }
+    catch (err) { log('Could not save voice route: ' + err.message, 'error'); }
+  });
+}
 
 $('saveButton').addEventListener('click', saveSettings);
 $('refreshVoices').addEventListener('click', refreshVoices);
