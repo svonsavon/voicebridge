@@ -354,10 +354,9 @@ async function startListening() {
 
   if (!directStarted) {
     capturePath = 'AudioWorklet';
-    audioContext = new AudioContext({
-      latencyHint: 'interactive',
-      sampleRate: Number(trackSettings.sampleRate || undefined)
-    });
+    const contextOptions = { latencyHint: 'interactive' };
+    if (Number(trackSettings.sampleRate) > 0) contextOptions.sampleRate = Number(trackSettings.sampleRate);
+    audioContext = new AudioContext(contextOptions);
     try { await audioContext.resume(); } catch {}
 
     const workletUrl = new URL('pcm-worklet.js', window.location.href).href;
@@ -429,17 +428,28 @@ async function startListening() {
 async function stopListening() {
   listening = false;
   resetUtterance();
+
+  const reader = trackReader;
+  trackReader = null;
+  try { await reader?.cancel(); } catch {}
+  trackProcessor = null;
+  trackProcessorTask = null;
+
   try { sourceNode?.disconnect(); } catch {}
   try { workletNode?.disconnect(); } catch {}
   try { silentGain?.disconnect(); } catch {}
   try { mediaStream?.getTracks().forEach((t) => t.stop()); } catch {}
   try { await audioContext?.close(); } catch {}
+
   sourceNode = null;
   workletNode = null;
   silentGain = null;
   mediaStream = null;
   audioContext = null;
+  capturePath = 'none';
+  captureSampleRate = 48000;
   pcmFramesSeen = 0;
+
   $('listenButton').textContent = 'Start always listening';
   $('liveBadge').textContent = 'stopped';
   $('liveBadge').className = 'badge off';
