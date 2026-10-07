@@ -253,32 +253,91 @@ async function startListening() {
   const granted = await window.voiceBridge.requestMicrophone();
   if (!granted) throw new Error('Microphone permission was not granted.');
 
-  mediaStream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      channelCount: 1,
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true
-    },
-    video: false
-  });
+  await refreshMicrophones().catch(() => {});
+  const selectedDeviceId = $('microphoneDevice')?.value || settings.microphoneDeviceId || '';
+
+  const audioConstraints = {
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false
+  };
+  if (selectedDeviceId) audioConstraints.deviceId = { exact: selectedDeviceId };
+
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: audioConstraints,
+      video: false
+    });
+  } catch (err) {
+    if (selectedDeviceId && (err?.name === 'OverconstrainedError' || err?.name === 'NotFoundError')) {
+      log('Saved microphone is unavailable; retrying with the system default input.', 'warn');
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false
+        },
+        video: false
+      });
+    } else {
+      throw err;
+    }
+  }
+
   if (audioContext.state !== 'running') await audioContext.resume();
+
+  const track = mediaStream.getAudioTracks()[0];
+  if (!track) throw new Error('macOS returned a microphone stream with no audio track.');
+  try { track.contentHint = 'speech'; } catch {}
+
+  track.addEventListener('mute', () => log('Microphone track became muted by the OS/device.', 'warn'));
+  track.addEventListener('unmute', () => log('Microphone track resumed.', 'ok'));
+  track.addEventListener('ended', () => log('Microphone track ended.', 'error'));
+
   const workletUrl = new URL('pcm-worklet.js', window.location.href).href;
   await audioContext.audioWorklet.addModule(workletUrl);
-  const source = audioContext.createMediaStreamSource(mediaStream);
+
+  sourceNode = audioContext.createMediaStreamSource(new MediaStream([track]));
   workletNode = new AudioWorkletNode(audioContext, 'pcm-processor');
-  workletNode.port.onmessage = (event) => handlePcm(new Float32Array(event.data));
-  source.connect(workletNode);
-  // Keep worklet alive without audible playback.
-  const silent = audioContext.createGain();
-  silent.gain.value = 0;
-  workletNode.connect(silent).connect(audioContext.destination);
+  workletNode.port.onmessage = (event) => {
+    const message = event.data;
+    if (message?.type === 'pcm') {
+      handlePcm(message.samples);
+      return;
+    }
+    if (message?.type === 'heartbeat' && listening && pcmFramesSeen === 0) {
+      const s = track.getSettings?.() || {};
+      log(
+        'AudioWorklet is alive but has no microphone frames yet ' +
+        '(track=' + track.readyState +
+        ', muted=' + track.muted +
+        ', channels=' + message.channels +
+        ', deviceChannels=' + (s.channelCount || '?') +
+        ', deviceRate=' + (s.sampleRate || '?') + ' Hz).',
+        'warn'
+      );
+    }
+  };
+  sourceNode.connect(workletNode);
+
+  silentGain = audioContext.createGain();
+  silentGain.gain.value = 0;
+  workletNode.connect(silentGain).connect(audioContext.destination);
 
   if (audioContext.state !== 'running') await audioContext.resume();
   listening = true;
   pcmFramesSeen = 0;
-  const track = mediaStream.getAudioTracks()[0];
-  log(`Mic opened: ${track?.label || 'default input'}; AudioContext=${audioContext.state}.`, 'info');
+
+  const trackSettings = track.getSettings?.() || {};
+  log(
+    'Mic opened: ' + (track.label || 'default input') +
+    '; track=' + track.readyState +
+    ', muted=' + track.muted +
+    ', deviceRate=' + (trackSettings.sampleRate || '?') + ' Hz' +
+    ', deviceChannels=' + (trackSettings.channelCount || '?') +
+    ', AudioContext=' + audioContext.state + '/' + audioContext.sampleRate + ' Hz.',
+    'info'
+  );
   setTimeout(() => {
     if (listening && pcmFramesSeen === 0) {
       log(`No microphone PCM received after 1.5 s (AudioContext=${audioContext?.state || 'closed'}). Stop/start listening once; if it persists, check System Settings → Privacy & Security → Microphone → VoiceBridge.`, 'error');
