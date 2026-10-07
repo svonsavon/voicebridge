@@ -106,10 +106,7 @@ function registerIpc() {
   ipcMain.handle('settings:get', () => loadSettings());
 
   ipcMain.handle('settings:save', (_, patch) => {
-    const saved = saveSettings(patch || {});
-    manualMuted = !!saved.manualMuted;
-    sendMuteState();
-    return saved;
+    return saveSettings(patch || {});
   });
 
   ipcMain.handle('microphone:request', async () => {
@@ -121,9 +118,12 @@ function registerIpc() {
 
   ipcMain.handle('mute:set-manual', (_, muted) => {
     manualMuted = !!muted;
-    saveSettings({ manualMuted });
     sendMuteState();
-    return { muted: effectiveMuted() };
+    return {
+      muted: effectiveMuted(),
+      helperMuted,
+      manualMuted
+    };
   });
 
   ipcMain.handle('tts:list-voices', async () => aivis.getSpeakers());
@@ -192,8 +192,7 @@ function registerIpc() {
 
 app.whenReady().then(async () => {
   registerIpc();
-  const settings = loadSettings();
-  manualMuted = !!settings.manualMuted;
+  manualMuted = false;
   await createWindow();
   await updater.initialize({ window: win, status });
   setTimeout(() => updater.check().catch(() => {}), 5000);
