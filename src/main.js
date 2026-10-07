@@ -11,6 +11,8 @@ const {
 const { loadSettings, saveSettings } = require('./services/settings');
 const whisper = require('./services/whisper');
 const { cleanTranscript } = require('./services/speechFilter');
+const qwenRuntime = require('./services/qwenRuntime');
+const languageRouter = require('./services/languageRouter');
 const aivis = require('./services/aivis');
 const discordVoice = require('./services/discordVoice');
 const updater = require('./services/updater');
@@ -96,6 +98,34 @@ async function createWindow() {
   await win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 }
 
+async function ensureQwenReady() {
+  const result = await qwenRuntime.ensureServer((line) => {
+    console.log(line);
+    if (line.includes('Downloading') || line.includes('Loading')) status('Qwen multilingual runtime is loading…', 'busy');
+  });
+  if (!result.ok) throw new Error(result.reason);
+  return true;
+}
+
+function selectedOutputLanguage(settings) {
+  return languageRouter.outputLanguageName(
+    settings.outputLanguage || 'same',
+    settings.inputLanguage || settings.whisperLanguage || 'en'
+  );
+}
+
+async function synthesizeSelected(text, settings, prosody = {}) {
+  const engine = settings.ttsEngine || 'aivis';
+  if (engine === 'qwen') {
+    await ensureQwenReady();
+    return qwenRuntime.synthesize(text, {
+      language: selectedOutputLanguage(settings),
+      voice: settings.qwenVoice || 'Ryan'
+    });
+  }
+  return aivis.synthesize(text, settings.aivisSpeakerId, prosody || {});
+}
+
 function registerIpc() {
   updater.registerIpc(ipcMain);
   ipcMain.handle('app:get-state', async () => ({
@@ -134,7 +164,15 @@ function registerIpc() {
 
   ipcMain.handle('tts:test', async (_, text) => {
     const settings = loadSettings({ includeToken: true });
-    const wav = await aivis.synthesize(String(text || 'VoiceBridge is ready.'), settings.aivisSpeakerId, {});
+    const outputLanguage = selectedOutputLanguage(settings);
+    const defaultTests = {
+      English: 'VoiceBridge is ready.',
+      Chinese: 'VoiceBridge 已经准备好了。',
+      Japanese: 'VoiceBridgeの準備ができました。',
+      Auto: 'VoiceBridge is ready.'
+    };
+    const testText = String(text || defaultTests[outputLanguage] || defaultTests.English);
+    const wav = await synthesizeSelected(testText, settings, {});
     if (discordVoice.isConnected()) {
       discordVoice.enqueue(wav);
       return { sentToDiscord: true };
@@ -171,24 +209,64 @@ function registerIpc() {
     const task = processing.then(async () => {
       if (effectiveMuted()) return { skipped: 'muted' };
       const settings = loadSettings({ includeToken: true });
+      const inputLanguage = settings.inputLanguage || settings.whisperLanguage || 'en';
+      const outputLanguage = settings.outputLanguage || 'same';
+
       status('Transcribing locally…', 'busy');
-      const rawText = await whisper.transcribe(wavBytes, settings.whisperLanguage || 'en');
+      const rawText = await whisper.transcribe(
+        wavBytes,
+        languageRouter.whisperLanguage(inputLanguage)
+      );
       const filtered = cleanTranscript(rawText);
       if (filtered.removed.length) {
         status(`Ignored non-speech: ${filtered.removed.join(', ')}`, 'info');
       }
-      const text = filtered.text;
-      if (!text || text === '[BLANK_AUDIO]') return { text: '', skipped: 'empty' };
-      status(`You: ${text}`, 'transcript');
 
-      const tts = await aivis.synthesize(text, settings.aivisSpeakerId, prosody || {});
+      const originalText = filtered.text;
+      if (!originalText || originalText === '[BLANK_AUDIO]') {
+        return { text: '', skipped: 'empty' };
+      }
+      status(`You: ${originalText}`, 'transcript');
+
+      let spokenText = originalText;
+      let translated = false;
+
+      if (languageRouter.shouldTranslate(inputLanguage, outputLanguage)) {
+        await ensureQwenReady();
+        const request = languageRouter.translationRequest(
+          originalText,
+          inputLanguage,
+          outputLanguage
+        );
+        status(`Translating to ${request.target}…`, 'busy');
+        spokenText = await qwenRuntime.translate(
+          request.text,
+          request.source,
+          request.target
+        );
+        translated = spokenText !== originalText;
+        status(`${request.target}: ${spokenText}`, 'translation');
+      }
+
+      const tts = await synthesizeSelected(spokenText, settings, prosody || {});
       if (!discordVoice.isConnected()) {
         status('Synthesized speech is ready, but Discord is not connected.', 'warn');
-        return { text, spoken: false };
+        return {
+          text: originalText,
+          outputText: spokenText,
+          translated,
+          spoken: false
+        };
       }
+
       discordVoice.enqueue(tts);
       status('Synthetic voice queued to Discord.', 'ok');
-      return { text, spoken: true };
+      return {
+        text: originalText,
+        outputText: spokenText,
+        translated,
+        spoken: true
+      };
     });
 
     processing = task.catch((err) => {
@@ -225,5 +303,6 @@ app.on('activate', () => {
 app.on('before-quit', () => {
   try { helper?.kill('SIGTERM'); } catch {}
   whisper.shutdown();
+  qwenRuntime.shutdown();
   discordVoice.disconnect();
 });
