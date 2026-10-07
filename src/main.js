@@ -100,7 +100,9 @@ function registerIpc() {
   ipcMain.handle('app:get-state', async () => ({
     whisperReady,
     discordConnected: discordVoice.isConnected(),
-    muted: effectiveMuted()
+    muted: effectiveMuted(),
+    helperMuted,
+    manualMuted
   }));
 
   ipcMain.handle('settings:get', () => loadSettings());
