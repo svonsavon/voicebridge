@@ -5,6 +5,11 @@ let mediaStream = null;
 let workletNode = null;
 let sourceNode = null;
 let silentGain = null;
+let trackProcessor = null;
+let trackReader = null;
+let trackProcessorTask = null;
+let captureSampleRate = 48000;
+let capturePath = 'none';
 let listening = false;
 let muted = false;
 let settings = {};
@@ -183,7 +188,7 @@ async function finalizeUtterance() {
   if (durationMs < minimum || muted) return;
 
   const pcm = flatten(utteranceChunks);
-  const wav = encodeWav(pcm, audioContext.sampleRate);
+  const wav = encodeWav(pcm, captureSampleRate || 48000);
   try {
     await window.voiceBridge.processUtterance(wav, {
       durationMs,
@@ -195,14 +200,15 @@ async function finalizeUtterance() {
   }
 }
 
-function handlePcm(samples) {
+function handlePcm(samples, sampleRate = captureSampleRate || 48000) {
   if (!listening || muted) return;
-  const frameMs = (samples.length / audioContext.sampleRate) * 1000;
+  captureSampleRate = sampleRate || captureSampleRate || 48000;
+  const frameMs = (samples.length / captureSampleRate) * 1000;
   const rms = rmsOf(samples);
   $('meterFill').style.width = `${Math.min(100, rms * 1200)}%`;
 
   pcmFramesSeen += 1;
-  if (pcmFramesSeen === 1) log(`Microphone PCM is flowing at ${audioContext.sampleRate} Hz.`, 'ok');
+  if (pcmFramesSeen === 1) log(`Microphone PCM is flowing at ${captureSampleRate} Hz via ${capturePath}.`, 'ok');
 
   const sensitivity = Number(settings.vadSensitivity || 2.4);
   const threshold = Math.max(0.0025, noiseFloor * sensitivity);
@@ -210,7 +216,7 @@ function handlePcm(samples) {
 
   if (!speechActive && !hot) noiseFloor = noiseFloor * 0.995 + rms * 0.005;
 
-  const maxPreRollFrames = Math.ceil((audioContext.sampleRate * 0.22) / samples.length);
+  const maxPreRollFrames = Math.ceil((captureSampleRate * 0.22) / samples.length);
   preRoll.push(samples);
   if (preRoll.length > maxPreRollFrames) preRoll.shift();
 
@@ -242,13 +248,59 @@ function handlePcm(samples) {
   }
 }
 
+async function startDirectTrackCapture(track) {
+  if (!('MediaStreamTrackProcessor' in window)) return false;
+
+  try {
+    trackProcessor = new MediaStreamTrackProcessor({ track });
+    trackReader = trackProcessor.readable.getReader();
+  } catch (err) {
+    trackProcessor = null;
+    trackReader = null;
+    log('Direct track capture unavailable: ' + err.message + '. Falling back to AudioWorklet.', 'warn');
+    return false;
+  }
+
+  capturePath = 'MediaStreamTrackProcessor';
+  trackProcessorTask = (async () => {
+    try {
+      while (listening && trackReader) {
+        const { value: frame, done } = await trackReader.read();
+        if (done || !frame) break;
+
+        try {
+          const channels = Math.max(1, Number(frame.numberOfChannels || 1));
+          const frames = Number(frame.numberOfFrames || 0);
+          if (!frames) continue;
+
+          const mono = new Float32Array(frames);
+          for (let channelIndex = 0; channelIndex < channels; channelIndex++) {
+            const plane = new Float32Array(frames);
+            frame.copyTo(plane, {
+              planeIndex: channelIndex,
+              format: 'f32-planar'
+            });
+            for (let i = 0; i < frames; i++) {
+              mono[i] += plane[i] / channels;
+            }
+          }
+
+          handlePcm(mono, Number(frame.sampleRate || captureSampleRate || 48000));
+        } finally {
+          try { frame.close(); } catch {}
+        }
+      }
+    } catch (err) {
+      if (listening) log('Direct microphone frame reader failed: ' + err.message, 'error');
+    }
+  })();
+
+  log('Using direct MediaStreamTrackProcessor capture (WebAudio bypassed).', 'ok');
+  return true;
+}
+
 async function startListening() {
   if (listening) return;
-
-  // Create/resume from the button gesture first. Chromium may otherwise leave
-  // the context suspended after an async macOS permission prompt.
-  audioContext = new AudioContext({ latencyHint: 'interactive' });
-  try { await audioContext.resume(); } catch {}
 
   const granted = await window.voiceBridge.requestMicrophone();
   if (!granted) throw new Error('Microphone permission was not granted.');
@@ -284,8 +336,6 @@ async function startListening() {
     }
   }
 
-  if (audioContext.state !== 'running') await audioContext.resume();
-
   const track = mediaStream.getAudioTracks()[0];
   if (!track) throw new Error('macOS returned a microphone stream with no audio track.');
   try { track.contentHint = 'speech'; } catch {}
@@ -294,55 +344,82 @@ async function startListening() {
   track.addEventListener('unmute', () => log('Microphone track resumed.', 'ok'));
   track.addEventListener('ended', () => log('Microphone track ended.', 'error'));
 
-  const workletUrl = new URL('pcm-worklet.js', window.location.href).href;
-  await audioContext.audioWorklet.addModule(workletUrl);
-
-  sourceNode = audioContext.createMediaStreamSource(new MediaStream([track]));
-  workletNode = new AudioWorkletNode(audioContext, 'pcm-processor');
-  workletNode.port.onmessage = (event) => {
-    const message = event.data;
-    if (message?.type === 'pcm') {
-      handlePcm(message.samples);
-      return;
-    }
-    if (message?.type === 'heartbeat' && listening && pcmFramesSeen === 0) {
-      const s = track.getSettings?.() || {};
-      log(
-        'AudioWorklet is alive but has no microphone frames yet ' +
-        '(track=' + track.readyState +
-        ', muted=' + track.muted +
-        ', channels=' + message.channels +
-        ', deviceChannels=' + (s.channelCount || '?') +
-        ', deviceRate=' + (s.sampleRate || '?') + ' Hz).',
-        'warn'
-      );
-    }
-  };
-  sourceNode.connect(workletNode);
-
-  silentGain = audioContext.createGain();
-  silentGain.gain.value = 0;
-  workletNode.connect(silentGain).connect(audioContext.destination);
-
-  if (audioContext.state !== 'running') await audioContext.resume();
-  listening = true;
-  pcmFramesSeen = 0;
-
   const trackSettings = track.getSettings?.() || {};
+  captureSampleRate = Number(trackSettings.sampleRate || 48000);
+  capturePath = 'starting';
+  pcmFramesSeen = 0;
+  listening = true;
+
+  const directStarted = await startDirectTrackCapture(track);
+
+  if (!directStarted) {
+    capturePath = 'AudioWorklet';
+    audioContext = new AudioContext({
+      latencyHint: 'interactive',
+      sampleRate: Number(trackSettings.sampleRate || undefined)
+    });
+    try { await audioContext.resume(); } catch {}
+
+    const workletUrl = new URL('pcm-worklet.js', window.location.href).href;
+    await audioContext.audioWorklet.addModule(workletUrl);
+
+    sourceNode = audioContext.createMediaStreamSource(new MediaStream([track]));
+    workletNode = new AudioWorkletNode(audioContext, 'pcm-processor');
+    workletNode.port.onmessage = (event) => {
+      const message = event.data;
+      if (message?.type === 'pcm') {
+        handlePcm(message.samples, audioContext.sampleRate);
+        return;
+      }
+      if (message?.type === 'heartbeat' && listening && pcmFramesSeen === 0) {
+        const s = track.getSettings?.() || {};
+        log(
+          'AudioWorklet is alive but has no microphone frames yet ' +
+          '(track=' + track.readyState +
+          ', muted=' + track.muted +
+          ', channels=' + message.channels +
+          ', deviceChannels=' + (s.channelCount || '?') +
+          ', deviceRate=' + (s.sampleRate || '?') + ' Hz).',
+          'warn'
+        );
+      }
+    };
+    sourceNode.connect(workletNode);
+
+    silentGain = audioContext.createGain();
+    silentGain.gain.value = 0;
+    workletNode.connect(silentGain).connect(audioContext.destination);
+
+    if (audioContext.state !== 'running') await audioContext.resume();
+    captureSampleRate = audioContext.sampleRate;
+  }
+
   log(
     'Mic opened: ' + (track.label || 'default input') +
     '; track=' + track.readyState +
     ', muted=' + track.muted +
     ', deviceRate=' + (trackSettings.sampleRate || '?') + ' Hz' +
     ', deviceChannels=' + (trackSettings.channelCount || '?') +
-    ', AudioContext=' + audioContext.state + '/' + audioContext.sampleRate + ' Hz.',
+    ', capture=' + capturePath + '.',
     'info'
   );
+
   setTimeout(() => {
     if (listening && pcmFramesSeen === 0) {
-      log(`No microphone PCM received after 1.5 s (AudioContext=${audioContext?.state || 'closed'}). Stop/start listening once; if it persists, check System Settings → Privacy & Security → Microphone → VoiceBridge.`, 'error');
+      const extra = capturePath === 'MediaStreamTrackProcessor' && trackProcessor
+        ? ', processorTotalFrames=' + (trackProcessor.totalFrames ?? '?') +
+          ', processorDiscardedFrames=' + (trackProcessor.discardedFrames ?? '?')
+        : '';
+      log(
+        'No microphone PCM received after 1.5 s ' +
+        '(capture=' + capturePath +
+        ', track=' + track.readyState +
+        ', muted=' + track.muted + extra + ').',
+        'error'
+      );
     }
   }, 1500);
+
   $('listenButton').textContent = 'Stop listening';
   $('liveBadge').textContent = 'always listening';
   $('liveBadge').className = 'badge on';
