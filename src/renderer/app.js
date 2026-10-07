@@ -3,6 +3,8 @@ const $ = (id) => document.getElementById(id);
 let audioContext = null;
 let mediaStream = null;
 let workletNode = null;
+let sourceNode = null;
+let silentGain = null;
 let listening = false;
 let muted = false;
 let settings = {};
@@ -44,6 +46,7 @@ async function loadSettings() {
   settings = await window.voiceBridge.getSettings();
   $('guildId').value = settings.guildId || '';
   $('channelId').value = settings.channelId || '';
+  if ($('microphoneDevice')) $('microphoneDevice').value = settings.microphoneDeviceId || '';
   $('whisperLanguage').value = settings.whisperLanguage || 'en';
   $('speechSilenceMs').value = settings.speechSilenceMs || 650;
   $('speechMinMs').value = settings.speechMinMs || 280;
@@ -55,6 +58,7 @@ async function saveSettings() {
   const patch = {
     guildId: $('guildId').value.trim(),
     channelId: $('channelId').value.trim(),
+    microphoneDeviceId: $('microphoneDevice')?.value || '',
     whisperLanguage: $('whisperLanguage').value,
     aivisSpeakerId: $('speakerId').value,
     speechSilenceMs: Number($('speechSilenceMs').value || 650),
@@ -66,6 +70,34 @@ async function saveSettings() {
   settings = await window.voiceBridge.saveSettings(patch);
   $('discordToken').value = '';
   log('Settings saved.', 'ok');
+}
+
+async function refreshMicrophones({ requestPermission = false } = {}) {
+  if (requestPermission) {
+    const granted = await window.voiceBridge.requestMicrophone();
+    if (!granted) throw new Error('Microphone permission was not granted.');
+  }
+
+  const select = $('microphoneDevice');
+  if (!select) return [];
+
+  const preferred = select.value || settings.microphoneDeviceId || '';
+  const devices = (await navigator.mediaDevices.enumerateDevices())
+    .filter((device) => device.kind === 'audioinput');
+
+  select.innerHTML = '<option value="">System default</option>';
+  devices.forEach((device, index) => {
+    const option = document.createElement('option');
+    option.value = device.deviceId;
+    option.textContent = device.label || ('Microphone ' + (index + 1));
+    select.appendChild(option);
+  });
+
+  if (preferred && devices.some((d) => d.deviceId === preferred)) {
+    select.value = preferred;
+  }
+
+  return devices;
 }
 
 async function refreshVoices() {
