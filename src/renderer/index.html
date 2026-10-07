@@ -24,6 +24,19 @@
     </section>
 
     <section>
+      <h2>Microphone</h2>
+      <div class="grid two">
+        <label>Input device
+          <select id="microphoneDevice"><option value="">System default</option></select>
+        </label>
+        <div class="row mic-actions">
+          <button id="refreshMicrophones">Refresh microphones</button>
+        </div>
+      </div>
+      <div class="hint">VoiceBridge captures the selected device directly. USB microphones are kept in their native channel layout and downmixed locally.</div>
+    </section>
+
+    <section>
       <h2>Discord bot</h2>
       <div class="grid two">
         <label>Bot token <input id="discordToken" type="password" placeholder="Leave blank to keep saved token" /></label>
