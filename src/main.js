@@ -172,6 +172,16 @@ function registerIpc() {
       Auto: 'VoiceBridge is ready.'
     };
     const testText = String(text || defaultTests[outputLanguage] || defaultTests.English);
+    if ((settings.ttsEngine || 'aivis') === 'qwen') {
+      status(
+        'Test voice: Qwen multilingual — ' +
+        (settings.qwenVoice || 'Ryan') +
+        ' (' + outputLanguage + ').',
+        'info'
+      );
+    } else {
+      status('Test voice: AivisSpeech.', 'info');
+    }
     const wav = await synthesizeSelected(testText, settings, {});
     if (discordVoice.isConnected()) {
       discordVoice.enqueue(wav);
@@ -246,6 +256,17 @@ function registerIpc() {
         );
         translated = spokenText !== originalText;
         status(`${request.target}: ${spokenText}`, 'translation');
+      }
+
+      if ((settings.ttsEngine || 'aivis') === 'qwen') {
+        status(
+          'TTS engine: Qwen multilingual — ' +
+          (settings.qwenVoice || 'Ryan') +
+          ' (' + selectedOutputLanguage(settings) + ').',
+          'info'
+        );
+      } else {
+        status('TTS engine: AivisSpeech.', 'info');
       }
 
       const tts = await synthesizeSelected(spokenText, settings, prosody || {});
