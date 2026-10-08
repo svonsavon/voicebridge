@@ -278,8 +278,23 @@ def wav_bytes(audio, sample_rate: int, text: str = "", token_count: int = 0, max
 
 
 def stream_pcm16(audio, sample_rate: int, text: str) -> bytes:
-    # Per-chunk safety. Total duration is enforced by the stream endpoint.
-    samples = validate_generated_audio(audio, sample_rate, text, 0, 0)
+    # Streaming chunks are only ~0.32 s, so whole-utterance RMS/clipping
+    # heuristics are not valid here: a normal stressed syllable can look
+    # "too loud" in a tiny window. Per-chunk checks therefore reject only
+    # structurally invalid / wildly out-of-range audio. Total duration and
+    # generation-token limits are enforced by the stream loop.
+    samples = np.asarray(audio, dtype=np.float32).reshape(-1)
+    if samples.size == 0:
+        return b""
+    if not np.all(np.isfinite(samples)):
+        raise RuntimeError("UNSAFE_AUDIO: streamed NaN/Inf samples")
+
+    peak = float(np.max(np.abs(samples)))
+    if peak > 4.0:
+        raise RuntimeError(
+            f"UNSAFE_AUDIO: streamed impossible peak level ({peak:.3f})"
+        )
+
     samples = np.clip(samples, -1.0, 1.0)
     return (samples * 32767.0).astype("<i2").tobytes()
 
@@ -485,28 +500,40 @@ def tts_clone_stream(req: CloneTTSRequest):
             model = load_clone_tts()
             model_sample_rate = int(getattr(model, "sample_rate", sample_rate))
 
-            for result in model.generate(
-                text=text,
-                language=req.language or "Auto",
-                ref_audio=req.ref_audio,
-                ref_text=None if req.naturalize else ref_text,
-                max_tokens=max_tokens,
-                stream=True,
-                streaming_interval=0.32,
-            ):
-                audio = np.asarray(result.audio, dtype=np.float32).reshape(-1)
-                if audio.size == 0:
-                    continue
+            try:
+                for result in model.generate(
+                    text=text,
+                    language=req.language or "Auto",
+                    ref_audio=req.ref_audio,
+                    ref_text=None if req.naturalize else ref_text,
+                    max_tokens=max_tokens,
+                    stream=True,
+                    streaming_interval=0.32,
+                ):
+                    audio = np.asarray(result.audio, dtype=np.float32).reshape(-1)
+                    if audio.size == 0:
+                        continue
 
-                total_samples += int(audio.size)
-                duration = total_samples / float(model_sample_rate)
-                if duration > max_duration:
-                    raise RuntimeError(
-                        f"RUNAWAY_AUDIO: streamed {duration:.1f}s "
-                        f"(limit {max_duration:.1f}s)"
-                    )
+                    total_samples += int(audio.size)
+                    duration = total_samples / float(model_sample_rate)
+                    if duration > max_duration:
+                        raise RuntimeError(
+                            f"RUNAWAY_AUDIO: streamed {duration:.1f}s "
+                            f"(limit {max_duration:.1f}s)"
+                        )
 
-                yield stream_pcm16(audio, model_sample_rate, text)
+                    chunk = stream_pcm16(audio, model_sample_rate, text)
+                    if chunk:
+                        yield chunk
+            except Exception as exc:
+                print(
+                    "TTS_STREAM_ERROR: "
+                    + exc.__class__.__name__
+                    + ": "
+                    + str(exc),
+                    flush=True,
+                )
+                raise
 
     return StreamingResponse(
         generate_audio(),
