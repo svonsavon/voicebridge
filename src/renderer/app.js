@@ -131,7 +131,8 @@ async function saveLiveVoiceSettings() {
     qwenVoice: $('qwenVoice').value,
     aivisSpeakerId: $('speakerId').value,
     speakerVerificationEnabled: $('speakerVerificationEnabled').checked,
-    speakerVerificationThreshold: Number($('speakerVerificationThreshold').value || 0.45)
+    speakerVerificationThreshold: Number($('speakerVerificationThreshold').value || 0.45),
+    adaptiveEndpointEnabled: $('adaptiveEndpointEnabled').checked
   };
   settings = await window.voiceBridge.saveSettings(patch);
 
