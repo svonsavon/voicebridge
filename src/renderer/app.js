@@ -84,6 +84,8 @@ async function loadSettings() {
   $('englishTranslationMode').value = settings.englishTranslationMode || 'fast';
   $('ttsEngine').value = settings.ttsEngine || 'aivis';
   $('qwenVoice').value = settings.qwenVoice || 'Ryan';
+  $('speakerVerificationEnabled').checked = settings.speakerVerificationEnabled !== false;
+  $('speakerVerificationThreshold').value = settings.speakerVerificationThreshold ?? 0.45;
   $('speechSilenceMs').value = settings.speechSilenceMs || 650;
   $('speechMinMs').value = settings.speechMinMs || 280;
   $('vadSensitivity').value = settings.vadSensitivity || 2.4;
@@ -102,6 +104,8 @@ async function saveSettings() {
     ttsEngine: $('ttsEngine').value,
     qwenVoice: $('qwenVoice').value,
     aivisSpeakerId: $('speakerId').value,
+    speakerVerificationEnabled: $('speakerVerificationEnabled').checked,
+    speakerVerificationThreshold: Number($('speakerVerificationThreshold').value || 0.45),
     speechSilenceMs: Number($('speechSilenceMs').value || 650),
     speechMinMs: Number($('speechMinMs').value || 280),
     vadSensitivity: Number($('vadSensitivity').value || 2.8)
@@ -121,7 +125,9 @@ async function saveLiveVoiceSettings() {
     whisperLanguage: $('inputLanguage').value,
     ttsEngine: $('ttsEngine').value,
     qwenVoice: $('qwenVoice').value,
-    aivisSpeakerId: $('speakerId').value
+    aivisSpeakerId: $('speakerId').value,
+    speakerVerificationEnabled: $('speakerVerificationEnabled').checked,
+    speakerVerificationThreshold: Number($('speakerVerificationThreshold').value || 0.45)
   };
   settings = await window.voiceBridge.saveSettings(patch);
 
@@ -707,7 +713,7 @@ $('ttsEngine')?.addEventListener('change', async () => {
   }
 });
 
-for (const id of ['inputLanguage', 'outputLanguage', 'englishTranslationMode', 'qwenVoice', 'speakerId']) {
+for (const id of ['inputLanguage', 'outputLanguage', 'englishTranslationMode', 'qwenVoice', 'speakerId', 'speakerVerificationEnabled', 'speakerVerificationThreshold']) {
   $(id)?.addEventListener('change', async () => {
     try { await saveLiveVoiceSettings(); }
     catch (err) { log('Could not save voice route: ' + err.message, 'error'); }
