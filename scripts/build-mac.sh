@@ -14,6 +14,14 @@ fi
 npm install
 bash scripts/build-hotkey.sh
 
+# Keep an already-installed local Qwen runtime in sync with the repository
+# without re-downloading model weights on every development rebuild.
+QWEN_ROOT="$HOME/Library/Application Support/VoiceBridge/qwen-runtime"
+if [[ -d "$QWEN_ROOT" && -f "runtime/qwen_server.py" ]]; then
+  cp "runtime/qwen_server.py" "$QWEN_ROOT/qwen_server.py"
+  echo "Synced local Qwen runtime server."
+fi
+
 # A locally built app does not require an Apple Developer signing identity.
 export CSC_IDENTITY_AUTO_DISCOVERY=false
 npx electron-builder --mac --arm64
