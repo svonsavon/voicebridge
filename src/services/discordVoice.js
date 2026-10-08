@@ -1,6 +1,6 @@
 const { spawn } = require('node:child_process');
 const path = require('node:path');
-const { Readable } = require('node:stream');
+const { Readable, Transform } = require('node:stream');
 const {
   Client,
   GatewayIntentBits,
@@ -23,6 +23,7 @@ let player = null;
 let queue = [];
 let playing = false;
 let currentFfmpeg = null;
+let currentSource = null;
 let onStatus = () => {};
 
 function inspectWav(buffer) {
@@ -135,6 +136,60 @@ function wavToDiscordPcm(wavBuffer) {
   return ff.stdout;
 }
 
+function rawPcmToDiscordPcm(source, { sampleRate = 24000, channels = 1 } = {}) {
+  const ff = spawn(ffmpegPath(), [
+    '-hide_banner', '-loglevel', 'error',
+    '-f', 's16le',
+    '-ar', String(sampleRate),
+    '-ac', String(channels),
+    '-i', 'pipe:0',
+    '-f', 's16le',
+    '-ar', '48000',
+    '-ac', '2',
+    'pipe:1'
+  ], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+  currentFfmpeg = ff;
+  currentSource = source;
+
+  const maxInputBytes = Math.ceil(sampleRate * channels * 2 * 35);
+  let inputBytes = 0;
+  const guard = new Transform({
+    transform(chunk, _encoding, callback) {
+      inputBytes += chunk.length;
+      if (inputBytes > maxInputBytes) {
+        callback(new Error('Blocked runaway streaming audio longer than 35 seconds.'));
+        return;
+      }
+      callback(null, chunk);
+    }
+  });
+
+  const stopOnError = (err) => {
+    onStatus({ level: 'error', text: `Streaming audio stopped: ${err.message}` });
+    try { source.destroy?.(); } catch {}
+    try { ff.kill('SIGKILL'); } catch {}
+  };
+
+  source.on('error', stopOnError);
+  guard.on('error', stopOnError);
+  ff.stdin.on('error', (err) => {
+    if (err?.code !== 'EPIPE') stopOnError(err);
+  });
+  ff.stderr.on('data', (d) => {
+    const text = d.toString().trim();
+    if (text) onStatus({ level: 'warn', text: `ffmpeg: ${text}` });
+  });
+  ff.on('error', (err) => onStatus({ level: 'error', text: `ffmpeg failed: ${err.message}` }));
+  ff.on('close', () => {
+    if (currentFfmpeg === ff) currentFfmpeg = null;
+    if (currentSource === source) currentSource = null;
+  });
+
+  source.pipe(guard).pipe(ff.stdin);
+  return ff.stdout;
+}
+
 function enqueue(wavBuffer) {
   if (!connection || !player) throw new Error('Discord is not connected.');
 
@@ -152,14 +207,40 @@ function enqueue(wavBuffer) {
     );
   }
 
-  queue.push(wav);
+  queue.push({ type: 'wav', wav });
+  playNext();
+}
+
+function enqueuePcmStream(stream, { sampleRate = 24000, channels = 1 } = {}) {
+  if (!connection || !player) throw new Error('Discord is not connected.');
+  if (!stream || typeof stream.pipe !== 'function') {
+    throw new Error('Streaming TTS did not provide a readable PCM stream.');
+  }
+
+  queue.push({
+    type: 'pcm-stream',
+    stream,
+    sampleRate,
+    channels
+  });
   playNext();
 }
 
 function playNext() {
   if (playing || !player || queue.length === 0) return;
-  const wav = queue.shift();
-  const pcm = wavToDiscordPcm(wav);
+
+  const item = queue.shift();
+  let pcm;
+
+  if (item?.type === 'pcm-stream') {
+    pcm = rawPcmToDiscordPcm(item.stream, {
+      sampleRate: item.sampleRate,
+      channels: item.channels
+    });
+  } else {
+    pcm = wavToDiscordPcm(item.wav);
+  }
+
   const resource = createAudioResource(pcm, { inputType: StreamType.Raw });
   playing = true;
   player.play(resource);
@@ -168,6 +249,8 @@ function playNext() {
 async function disconnect() {
   queue = [];
   playing = false;
+  try { currentSource?.destroy?.(); } catch {}
+  currentSource = null;
   try { currentFfmpeg?.kill('SIGKILL'); } catch {}
   currentFfmpeg = null;
   try { player?.stop(true); } catch {}
@@ -184,4 +267,4 @@ function isConnected() {
   return !!connection && connection.state?.status === VoiceConnectionStatus.Ready;
 }
 
-module.exports = { connect, disconnect, enqueue, isConnected };
+module.exports = { connect, disconnect, enqueue, enqueuePcmStream, isConnected };
