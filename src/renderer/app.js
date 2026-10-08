@@ -29,6 +29,7 @@ let voicedMs = 0;
 let utteranceNoiseFloor = 0.0015;
 let hesitationCount = 0;
 let longestPauseMs = 0;
+let bargeInAttempted = false;
 let pcmFramesSeen = 0;
 let processedFramesSeen = 0;
 let remoteMuted = false;
@@ -257,6 +258,7 @@ function resetUtterance() {
   utteranceNoiseFloor = noiseFloor;
   hesitationCount = 0;
   longestPauseMs = 0;
+  bargeInAttempted = false;
 }
 
 function rmsOf(samples) {
@@ -349,6 +351,32 @@ async function finalizeUtterance() {
   }
 }
 
+async function maybeBargeIn() {
+  if (
+    bargeInAttempted ||
+    !speechActive ||
+    voicedMs < 550 ||
+    !window.voiceBridge.bargeIn
+  ) {
+    return;
+  }
+
+  bargeInAttempted = true;
+
+  try {
+    const pcm = flatten(chunks);
+    if (!pcm.length) return;
+    const wav = encodeWav(pcm, captureSampleRate || 48000);
+    const result = await window.voiceBridge.bargeIn(wav);
+
+    if (result?.interrupted) {
+      log('Barge-in accepted — current VoiceBridge speech stopped.', 'ok');
+    }
+  } catch (err) {
+    log('Barge-in check failed: ' + err.message, 'warn');
+  }
+}
+
 function adaptiveSilenceTargetMs() {
   const configuredMax = Math.max(
     350,
@@ -434,7 +462,12 @@ function handlePcm(samples, sampleRate = captureSampleRate || 48000) {
   rmsFrames += 1;
   peakRms = Math.max(peakRms, rms);
 
-  if (hot) voicedMs += frameMs;
+  if (hot) {
+    voicedMs += frameMs;
+    if (voicedMs >= 550 && !bargeInAttempted) {
+      maybeBargeIn();
+    }
+  }
 
   if (rms < threshold * 0.7) {
     silenceMs += frameMs;
