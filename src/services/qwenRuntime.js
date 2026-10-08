@@ -129,6 +129,21 @@ async function synthesize(text, { language = 'Auto', voice = 'Ryan' } = {}) {
   return Buffer.from(await response.arrayBuffer());
 }
 
+async function synthesizeClone(text, { language = 'Auto', refAudio, refText } = {}) {
+  const response = await fetch(`${BASE_URL}/tts-clone`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text,
+      language,
+      ref_audio: refAudio,
+      ref_text: refText
+    })
+  });
+  if (!response.ok) throw new Error(`Qwen clone TTS HTTP ${response.status}: ${await response.text()}`);
+  return Buffer.from(await response.arrayBuffer());
+}
+
 function shutdown() {
   if (child && !child.killed) {
     try { child.kill('SIGTERM'); } catch {}
@@ -143,6 +158,7 @@ module.exports = {
   getVoices,
   translate,
   synthesize,
+  synthesizeClone,
   shutdown,
   runtimeRoot
 };
