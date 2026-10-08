@@ -24,16 +24,23 @@ function metadataPath() {
 function getProfile() {
   try {
     const meta = JSON.parse(fs.readFileSync(metadataPath(), 'utf8'));
-    if (!fs.existsSync(audioPath())) return { configured: false };
+    const hasAudio = fs.existsSync(audioPath());
+    const refText = String(meta.refText || '').trim();
     return {
-      configured: true,
+      configured: hasAudio && !!refText,
+      hasAudio,
       name: meta.name || 'My Voice',
-      refText: meta.refText || '',
-      audioPath: audioPath(),
+      refText,
+      audioPath: hasAudio ? audioPath() : '',
       createdAt: meta.createdAt || null
     };
   } catch {
-    return { configured: false };
+    return {
+      configured: false,
+      hasAudio: fs.existsSync(audioPath()),
+      refText: '',
+      audioPath: fs.existsSync(audioPath()) ? audioPath() : ''
+    };
   }
 }
 
@@ -66,17 +73,17 @@ function normalizeAudio(sourcePath, destinationPath) {
   });
 }
 
-async function importReference(sourcePath, refText) {
+async function importReference(sourcePath, refText = '') {
   const transcript = String(refText || '').trim();
-  if (!transcript) throw new Error('Enter the exact transcript of the reference recording first.');
   if (!sourcePath || !fs.existsSync(sourcePath)) throw new Error('Reference audio file was not found.');
 
   fs.mkdirSync(profileDir(), { recursive: true });
   await normalizeAudio(sourcePath, audioPath());
 
+  const existing = getProfile();
   const meta = {
     name: 'My Voice',
-    refText: transcript,
+    refText: transcript || existing.refText || '',
     createdAt: new Date().toISOString()
   };
   fs.writeFileSync(metadataPath(), JSON.stringify(meta, null, 2), { mode: 0o600 });
@@ -84,4 +91,23 @@ async function importReference(sourcePath, refText) {
   return getProfile();
 }
 
-module.exports = { getProfile, importReference, profileDir, audioPath };
+function setTranscript(refText) {
+  const transcript = String(refText || '').trim();
+  if (!fs.existsSync(audioPath())) {
+    throw new Error('Choose a reference recording first.');
+  }
+  if (!transcript) {
+    throw new Error('Enter the exact transcript of the reference recording.');
+  }
+
+  const current = getProfile();
+  const meta = {
+    name: 'My Voice',
+    refText: transcript,
+    createdAt: current.createdAt || new Date().toISOString()
+  };
+  fs.writeFileSync(metadataPath(), JSON.stringify(meta, null, 2), { mode: 0o600 });
+  return getProfile();
+}
+
+module.exports = { getProfile, importReference, setTranscript, profileDir, audioPath };
