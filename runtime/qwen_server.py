@@ -216,12 +216,11 @@ def strip_thinking(text: str) -> str:
 
 
 def generation_limits(text: str):
-    # VoiceBridge utterances are short conversational turns. Qwen3-TTS runs at
-    # roughly 12.5 codec tokens/sec; this cap leaves generous headroom while
-    # preventing the known no-EOS runaway from generating minutes of garbage.
+    # Keep short utterances tightly bounded to contain no-EOS runaways, but let
+    # genuinely long conversational turns finish normally.
     chars = max(1, len(text.strip()))
-    max_tokens = min(320, max(80, chars * 5))
-    max_duration = min(30.0, max(6.0, chars * 0.35 + 5.0))
+    max_tokens = min(640, max(80, chars * 5))
+    max_duration = min(55.0, max(6.0, chars * 0.35 + 5.0))
     return max_tokens, max_duration
 
 
