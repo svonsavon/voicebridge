@@ -20,6 +20,10 @@ function defaultModel() {
   return path.join(runtimeRoot(), 'models', 'ggml-small.bin');
 }
 
+function defaultVadModel() {
+  return path.join(runtimeRoot(), 'models', 'ggml-silero-v6.2.0.bin');
+}
+
 async function healthy(timeoutMs = 1000) {
   try {
     const controller = new AbortController();
@@ -57,11 +61,27 @@ async function ensureServer(onLog = () => {}) {
     }
   };
 
-  child = spawn(binary, [
+  const args = [
     '--host', HOST,
     '--port', String(PORT),
     '-m', model
-  ], {
+  ];
+  const vadModel = defaultVadModel();
+  if (fs.existsSync(vadModel)) {
+    args.push(
+      '--vad',
+      '--vad-model', vadModel,
+      '--vad-threshold', '0.58',
+      '--vad-min-speech-duration-ms', '220',
+      '--vad-min-silence-duration-ms', '100',
+      '--vad-speech-pad-ms', '40'
+    );
+    onLog('[whisper] Silero VAD enabled.');
+  } else {
+    onLog('[whisper] Silero VAD model missing; using VoiceBridge front-end VAD only.');
+  }
+
+  child = spawn(binary, args, {
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
@@ -116,6 +136,16 @@ async function transcribe(wavBytes, language = 'en', { translateToEnglish = fals
   form.append('suppress_nst', 'true');
   form.append('translate', translateToEnglish ? 'true' : 'false');
   form.append('token_timestamps', 'false');
+  if (fs.existsSync(defaultVadModel())) {
+    form.append('vad', 'true');
+    form.append('vad_threshold', '0.58');
+    form.append('vad_min_speech_duration_ms', '220');
+    form.append('vad_min_silence_duration_ms', '100');
+    form.append('vad_speech_pad_ms', '40');
+  }
+  // Slightly stricter than whisper.cpp's default. Combined with VAD, this
+  // helps reject mostly-silent clips that would otherwise hallucinate a word.
+  form.append('no_speech_thold', '0.50');
   if (language) form.append('language', language);
 
   const response = await fetch(`${BASE_URL}/inference`, {
@@ -134,4 +164,12 @@ function shutdown() {
   child = null;
 }
 
-module.exports = { ensureServer, transcribe, shutdown, runtimeRoot, defaultBinary, defaultModel };
+module.exports = {
+  ensureServer,
+  transcribe,
+  shutdown,
+  runtimeRoot,
+  defaultBinary,
+  defaultModel,
+  defaultVadModel
+};
