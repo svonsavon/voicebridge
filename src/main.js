@@ -170,7 +170,6 @@ function registerIpc() {
 
   ipcMain.handle('voice:import-reference', async (_, { refText } = {}) => {
     const transcript = String(refText || '').trim();
-    if (!transcript) throw new Error('Enter the exact transcript of your recording first.');
 
     const result = await dialog.showOpenDialog(win, {
       title: 'Choose your voice reference recording',
@@ -184,7 +183,16 @@ function registerIpc() {
 
     status('Preparing personal voice reference…', 'busy');
     const profile = await voiceProfile.importReference(result.filePaths[0], transcript);
-    status('My Voice reference saved locally.', 'ok');
+
+    if (profile.configured) status('My Voice reference saved locally.', 'ok');
+    else status('Reference recording saved. Add its exact transcript to finish My Voice setup.', 'warn');
+
+    return profile;
+  });
+
+  ipcMain.handle('voice:set-transcript', async (_, { refText } = {}) => {
+    const profile = voiceProfile.setTranscript(refText);
+    status('My Voice transcript saved. Personal voice is ready.', 'ok');
     return profile;
   });
 
