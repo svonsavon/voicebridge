@@ -24,6 +24,7 @@ let queue = [];
 let playing = false;
 let currentFfmpeg = null;
 let currentSource = null;
+let outputGainPercent = 100;
 let onStatus = () => {};
 
 function inspectWav(buffer) {
@@ -68,6 +69,23 @@ function inspectWav(buffer) {
   }
 
   return { ...fmt, dataSize, durationSeconds };
+}
+
+function setOutputGain(percent) {
+  const value = Number(percent);
+  outputGainPercent = Number.isFinite(value)
+    ? Math.max(0, Math.min(400, value))
+    : 100;
+  return outputGainPercent;
+}
+
+function gainFilterArgs() {
+  if (Math.abs(outputGainPercent - 100) < 0.001) return [];
+  const gain = outputGainPercent / 100;
+  return [
+    '-af',
+    `volume=${gain.toFixed(3)},alimiter=limit=0.95`
+  ];
 }
 
 function ffmpegPath() {
@@ -120,6 +138,7 @@ function wavToDiscordPcm(wavBuffer) {
   const ff = spawn(ffmpegPath(), [
     '-hide_banner', '-loglevel', 'error',
     '-i', 'pipe:0',
+    ...gainFilterArgs(),
     '-f', 's16le',
     '-ar', '48000',
     '-ac', '2',
@@ -143,6 +162,7 @@ function rawPcmToDiscordPcm(source, { sampleRate = 24000, channels = 1 } = {}) {
     '-ar', String(sampleRate),
     '-ac', String(channels),
     '-i', 'pipe:0',
+    ...gainFilterArgs(),
     '-f', 's16le',
     '-ar', '48000',
     '-ac', '2',
@@ -300,5 +320,6 @@ module.exports = {
   enqueue,
   enqueuePcmStream,
   isConnected,
-  hasActiveAudio
+  hasActiveAudio,
+  setOutputGain
 };
