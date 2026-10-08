@@ -168,8 +168,7 @@ async function prepareClone({ refAudio, refText, naturalize = true } = {}) {
     body: JSON.stringify({
       ref_audio: refAudio,
       ref_text: refText,
-      naturalize,
-      expressive
+      naturalize
     })
   });
   return !!data.ok;
