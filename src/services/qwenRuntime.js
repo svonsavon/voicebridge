@@ -111,6 +111,22 @@ async function getVoices() {
   return requestJson('/voices');
 }
 
+async function verifySpeaker(wavBytes, { refAudio, threshold = 0.45 } = {}) {
+  const url = new URL(`${BASE_URL}/speaker-verify`);
+  url.searchParams.set('ref_audio', refAudio || '');
+  url.searchParams.set('threshold', String(threshold));
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'audio/wav' },
+    body: Buffer.from(wavBytes)
+  });
+  if (!response.ok) {
+    throw new Error(`Speaker verification HTTP ${response.status}: ${await response.text()}`);
+  }
+  return response.json();
+}
+
 async function translate(text, source, target) {
   const data = await requestJson('/translate', {
     method: 'POST',
@@ -229,6 +245,7 @@ module.exports = {
   ensureServer,
   healthy,
   getVoices,
+  verifySpeaker,
   translate,
   synthesize,
   prepareClone,
