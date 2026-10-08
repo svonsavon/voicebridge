@@ -160,22 +160,44 @@ async function prepareClone({ refAudio, refText } = {}) {
 
 async function synthesizeCloneStream(
   text,
-  { language = 'Auto', refAudio, refText, onFirstAudio = () => {} } = {}
+  {
+    language = 'Auto',
+    refAudio,
+    refText,
+    onFirstAudio = () => {},
+    timeoutMs = 20_000
+  } = {}
 ) {
-  const response = await fetch(`${BASE_URL}/tts-clone-stream`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      text,
-      language,
-      ref_audio: refAudio,
-      ref_text: refText
-    })
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    try { controller.abort(new Error('TTS stream timed out.')); } catch {}
+  }, Math.max(5_000, Number(timeoutMs || 20_000)));
+
+  let response;
+  try {
+    response = await fetch(`${BASE_URL}/tts-clone-stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text,
+        language,
+        ref_audio: refAudio,
+        ref_text: refText
+      }),
+      signal: controller.signal
+    });
+  } catch (err) {
+    clearTimeout(timeout);
+    throw err;
+  }
   if (!response.ok) {
+    clearTimeout(timeout);
     throw new Error(`Qwen clone stream HTTP ${response.status}: ${await response.text()}`);
   }
-  if (!response.body) throw new Error('Qwen clone stream returned no body.');
+  if (!response.body) {
+    clearTimeout(timeout);
+    throw new Error('Qwen clone stream returned no body.');
+  }
 
   const sampleRate = Number(response.headers.get('x-voicebridge-sample-rate') || 24000);
   const channels = Number(response.headers.get('x-voicebridge-channels') || 1);
@@ -206,15 +228,26 @@ async function synthesizeCloneStream(
       rejectDone(err);
       throw err;
     } finally {
+      clearTimeout(timeout);
       try { reader.releaseLock(); } catch {}
     }
   }
 
+  const stream = Readable.from(chunks());
+
+  const cancel = (reason = 'interrupted') => {
+    clearTimeout(timeout);
+    try { controller.abort(new Error(reason)); } catch {}
+    try { reader.cancel(reason); } catch {}
+    try { stream.destroy(); } catch {}
+  };
+
   return {
-    stream: Readable.from(chunks()),
+    stream,
     sampleRate,
     channels,
-    completed
+    completed,
+    cancel
   };
 }
 
