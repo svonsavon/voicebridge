@@ -329,15 +329,32 @@ function registerIpc() {
       const settings = loadSettings({ includeToken: true });
       const inputLanguage = settings.inputLanguage || settings.whisperLanguage || 'en';
       const outputLanguage = settings.outputLanguage || 'same';
+      const englishTranslationMode = settings.englishTranslationMode || 'fast';
+      const fastEnglish =
+        englishTranslationMode === 'fast' &&
+        outputLanguage === 'en' &&
+        inputLanguage !== 'en';
 
       const utteranceStarted = Date.now();
       const transcribeStarted = Date.now();
-      status('Transcribing locally…', 'busy');
+      status(
+        fastEnglish
+          ? 'Transcribing + translating directly to English with Whisper…'
+          : 'Transcribing locally…',
+        'busy'
+      );
       const rawText = await whisper.transcribe(
         wavBytes,
-        languageRouter.whisperLanguage(inputLanguage)
+        languageRouter.whisperLanguage(inputLanguage),
+        { translateToEnglish: fastEnglish }
       );
-      status('Transcription: ' + ((Date.now() - transcribeStarted) / 1000).toFixed(2) + ' s.', 'info');
+      status(
+        (fastEnglish ? 'Whisper + English translation: ' : 'Transcription: ') +
+        ((Date.now() - transcribeStarted) / 1000).toFixed(2) +
+        ' s.',
+        'info'
+      );
+
       const filtered = cleanTranscript(rawText);
       if (filtered.removed.length) {
         status(`Ignored non-speech: ${filtered.removed.join(', ')}`, 'info');
@@ -347,12 +364,19 @@ function registerIpc() {
       if (!originalText || originalText === '[BLANK_AUDIO]') {
         return { text: '', skipped: 'empty' };
       }
-      status(`You: ${originalText}`, 'transcript');
+
+      if (fastEnglish) {
+        status('Fast English path: separate Qwen translation skipped.', 'ok');
+        status(`You: ${originalText}`, 'transcript');
+        status(`English (Whisper): ${originalText}`, 'translation');
+      } else {
+        status(`You: ${originalText}`, 'transcript');
+      }
 
       let spokenText = originalText;
-      let translated = false;
+      let translated = fastEnglish;
 
-      if (languageRouter.shouldTranslate(inputLanguage, outputLanguage)) {
+      if (!fastEnglish && languageRouter.shouldTranslate(inputLanguage, outputLanguage)) {
         await ensureQwenReady();
         const request = languageRouter.translationRequest(
           originalText,
