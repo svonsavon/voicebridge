@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { Readable } = require('node:stream');
 
@@ -146,6 +147,20 @@ async function synthesize(text, { language = 'Auto', voice = 'Ryan' } = {}) {
   return Buffer.from(await response.arrayBuffer());
 }
 
+async function cancelTtsRequest(requestId) {
+  if (!requestId) return false;
+  try {
+    const data = await requestJson('/tts-cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ request_id: requestId })
+    });
+    return !!data.cancelled;
+  } catch {
+    return false;
+  }
+}
+
 async function prepareClone({ refAudio, refText, naturalize = true } = {}) {
   const data = await requestJson('/prepare-clone', {
     method: 'POST',
@@ -172,6 +187,7 @@ async function synthesizeCloneStream(
   } = {}
 ) {
   const controller = new AbortController();
+  const requestId = crypto.randomUUID();
   let watchdog = null;
 
   const armWatchdog = (ms, message) => {
@@ -193,7 +209,8 @@ async function synthesizeCloneStream(
         language,
         ref_audio: refAudio,
         ref_text: refText,
-        naturalize
+        naturalize,
+        request_id: requestId
       }),
       signal: controller.signal
     });
@@ -250,6 +267,9 @@ async function synthesizeCloneStream(
       }
       resolveDone();
     } catch (err) {
+      // If the HTTP transport dies, explicitly release the Python generation
+      // rather than leaving it holding the clone lock.
+      cancelTtsRequest(requestId).catch(() => {});
       rejectDone(err);
       throw err;
     } finally {
@@ -265,6 +285,10 @@ async function synthesizeCloneStream(
     const err = new Error(reason);
     err.code = 'VOICEBRIDGE_INTERRUPTED';
     rejectDone(err);
+
+    // Signal Python first. Abort the HTTP stream immediately as well; the
+    // server-side event will make the generator break at its next chunk.
+    cancelTtsRequest(requestId).catch(() => {});
     try { controller.abort(err); } catch {}
     try { reader.cancel(reason); } catch {}
     try { stream.destroy(err); } catch {}
