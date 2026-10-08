@@ -38,7 +38,7 @@ if [[ ! -x "$VENV/bin/python" ]]; then
 fi
 
 "$VENV/bin/python" -m pip install --upgrade pip wheel
-"$VENV/bin/python" -m pip install --upgrade   "fastapi>=0.115"   "uvicorn>=0.34"   "numpy>=2.0"   "mlx-lm>=0.31.1"   "mlx-audio[tts]>=0.3.0"   "huggingface_hub[hf_xet]>=1.0"
+"$VENV/bin/python" -m pip install --upgrade   "fastapi>=0.115"   "uvicorn>=0.34"   "numpy>=2.0"   "mlx-lm>=0.31.1"   "mlx-audio[tts]>=0.3.0"   "huggingface_hub[hf_xet]>=1.0" "sherpa-onnx"
 
 echo
 echo "Downloading local translation, preset TTS, and personal voice-clone models..."
