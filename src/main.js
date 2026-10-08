@@ -105,7 +105,12 @@ async function createWindow() {
 async function ensureQwenReady() {
   const result = await qwenRuntime.ensureServer((line) => {
     console.log(line);
-    if (line.includes('Downloading') || line.includes('Loading')) status('Qwen multilingual runtime is loading…', 'busy');
+    if (line.includes('Downloading') || line.includes('Loading')) {
+      status('Qwen multilingual runtime is loading…', 'busy');
+    }
+    if (line.includes('exited')) {
+      status('Qwen runtime stopped. VoiceBridge will attempt to restart it on the next phrase.', 'warn');
+    }
   });
   if (!result.ok) throw new Error(result.reason);
   return true;
