@@ -43,6 +43,15 @@
         <label>Server (Guild) ID <input id="guildId" /></label>
         <label>Voice Channel ID <input id="channelId" /></label>
       </div>
+      <div class="grid two" style="margin-top: 12px;">
+        <label>Discord output volume
+          <input id="discordOutputGainPercent" type="range" min="0" max="400" step="5" />
+          <span id="discordOutputGainLabel">100%</span>
+        </label>
+      </div>
+      <div class="hint">
+        100% is unchanged. Boosts up to 400% are limited to reduce digital clipping, but high settings can still be uncomfortably loud.
+      </div>
       <div class="row">
         <button id="saveButton">Save settings</button>
         <button id="connectButton">Connect bot</button>
@@ -116,6 +125,15 @@
       </div>
       <div class="hint">
         Natural mode uses your recording mainly for speaker identity, so Qwen can supply cleaner pronunciation, stress, rhythm, and sentence melody in the selected output language.
+      </div>
+      <div class="grid two" style="margin-top: 12px;">
+        <label class="checkbox-row">
+          <input id="expressiveDeliveryEnabled" type="checkbox" />
+          Expressive delivery (experimental)
+        </label>
+      </div>
+      <div class="hint">
+        Adds more variation to My Voice generation without changing the words or replacing the current Natural mode. Turn it off to return to the current stable delivery.
       </div>
 
       <div id="myVoiceSetup" class="grid" style="margin-top: 12px;">
