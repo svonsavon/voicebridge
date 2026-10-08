@@ -289,11 +289,16 @@ function isConnected() {
   return !!connection && connection.state?.status === VoiceConnectionStatus.Ready;
 }
 
+function hasActiveAudio() {
+  return playing || queue.length > 0 || !!currentFfmpeg || !!currentSource;
+}
+
 module.exports = {
   connect,
   disconnect,
   interrupt,
   enqueue,
   enqueuePcmStream,
-  isConnected
+  isConnected,
+  hasActiveAudio
 };
