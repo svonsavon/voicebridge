@@ -129,6 +129,18 @@ async function synthesize(text, { language = 'Auto', voice = 'Ryan' } = {}) {
   return Buffer.from(await response.arrayBuffer());
 }
 
+async function prepareClone({ refAudio, refText } = {}) {
+  const data = await requestJson('/prepare-clone', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ref_audio: refAudio,
+      ref_text: refText
+    })
+  });
+  return !!data.ok;
+}
+
 async function synthesizeClone(text, { language = 'Auto', refAudio, refText } = {}) {
   const response = await fetch(`${BASE_URL}/tts-clone`, {
     method: 'POST',
@@ -158,6 +170,7 @@ module.exports = {
   getVoices,
   translate,
   synthesize,
+  prepareClone,
   synthesizeClone,
   shutdown,
   runtimeRoot
