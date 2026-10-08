@@ -176,14 +176,6 @@ def stream_pcm16(audio, sample_rate: int, text: str) -> bytes:
     samples = np.clip(samples, -1.0, 1.0)
     return (samples * 32767.0).astype("<i2").tobytes()
 
-    out = io.BytesIO()
-    with wave.open(out, "wb") as handle:
-        handle.setnchannels(1)
-        handle.setsampwidth(2)
-        handle.setframerate(int(sample_rate))
-        handle.writeframes(pcm)
-    return out.getvalue()
-
 
 @app.get("/health")
 def health():
