@@ -321,6 +321,11 @@ function registerIpc() {
       }
     }
 
+    const stillActive = discordVoice.hasActiveAudio() || !!activeTtsCancel;
+    if (!stillActive) {
+      return { ok: true, interrupted: false, reason: 'finished-during-verification' };
+    }
+
     interactionEpoch += 1;
 
     try { activeTtsCancel?.('barge-in'); } catch {}
