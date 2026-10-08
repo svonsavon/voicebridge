@@ -69,6 +69,7 @@ class CloneTTSRequest(BaseModel):
     ref_audio: str
     ref_text: str
     naturalize: bool = True
+    expressive: bool = False
     request_id: str = ""
 
 
@@ -558,15 +559,21 @@ def tts_clone_stream(req: CloneTTSRequest):
                 model_sample_rate = int(getattr(model, "sample_rate", sample_rate))
 
                 try:
-                    for result in model.generate(
-                        text=text,
-                        language=req.language or "Auto",
-                        ref_audio=req.ref_audio,
-                        ref_text=None if req.naturalize else ref_text,
-                        max_tokens=max_tokens,
-                        stream=True,
-                        streaming_interval=0.32,
-                    ):
+                    generate_kwargs = {
+                        "text": text,
+                        "language": req.language or "Auto",
+                        "ref_audio": req.ref_audio,
+                        "ref_text": None if req.naturalize else ref_text,
+                        "max_tokens": max_tokens,
+                        "stream": True,
+                        "streaming_interval": 0.32,
+                    }
+                    if req.expressive:
+                        # Experimental only: increase sampling diversity while
+                        # keeping the same Base clone, reference, and text.
+                        generate_kwargs["temperature"] = 1.08
+
+                    for result in model.generate(**generate_kwargs):
                         if cancel_event.is_set():
                             print(
                                 "TTS_STREAM_CANCELLED: " + (req.request_id or "anonymous"),
@@ -635,15 +642,17 @@ def tts_clone(req: CloneTTSRequest):
     max_tokens, _ = generation_limits(text)
     with _clone_lock:
         model = load_clone_tts()
-        results = list(
-            model.generate(
-                text=text,
-                language=req.language or "Auto",
-                ref_audio=req.ref_audio,
-                ref_text=None if req.naturalize else ref_text,
-                max_tokens=max_tokens,
-            )
-        )
+        generate_kwargs = {
+            "text": text,
+            "language": req.language or "Auto",
+            "ref_audio": req.ref_audio,
+            "ref_text": None if req.naturalize else ref_text,
+            "max_tokens": max_tokens,
+        }
+        if req.expressive:
+            generate_kwargs["temperature"] = 1.08
+
+        results = list(model.generate(**generate_kwargs))
         if not results:
             raise HTTPException(status_code=500, detail="voice clone returned no audio")
         result = results[0]
