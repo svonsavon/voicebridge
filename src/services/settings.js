@@ -11,6 +11,7 @@ const defaults = {
   englishTranslationMode: 'fast',
   whisperLanguage: 'en',
   ttsEngine: 'aivis',
+  cloneStyle: 'natural',
   aivisSpeakerId: '',
   qwenVoice: 'Ryan',
   speakerVerificationEnabled: true,
