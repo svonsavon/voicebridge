@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 TRANSLATION_MODEL = "Qwen/Qwen3-0.6B-MLX-4bit"
 TTS_MODEL = "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-8bit"
+CLONE_MODEL = "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit"
 
 VOICES = [
     {"id": "Ryan", "name": "Ryan", "nativeLanguage": "English"},
@@ -31,8 +32,10 @@ app = FastAPI(title="VoiceBridge Qwen Runtime")
 _translation_model = None
 _translation_tokenizer = None
 _tts_model = None
+_clone_model = None
 _translation_lock = threading.Lock()
 _tts_lock = threading.Lock()
+_clone_lock = threading.Lock()
 
 
 class TranslateRequest(BaseModel):
@@ -45,6 +48,13 @@ class TTSRequest(BaseModel):
     text: str
     language: str = "Auto"
     voice: str = "Ryan"
+
+
+class CloneTTSRequest(BaseModel):
+    text: str
+    language: str = "Auto"
+    ref_audio: str
+    ref_text: str
 
 
 def load_translation():
@@ -61,6 +71,14 @@ def load_tts():
         from mlx_audio.tts.utils import load_model
         _tts_model = load_model(TTS_MODEL)
     return _tts_model
+
+
+def load_clone_tts():
+    global _clone_model
+    if _clone_model is None:
+        from mlx_audio.tts.utils import load_model
+        _clone_model = load_model(CLONE_MODEL)
+    return _clone_model
 
 
 def strip_thinking(text: str) -> str:
@@ -90,6 +108,7 @@ def health():
         "ok": True,
         "translationLoaded": _translation_model is not None,
         "ttsLoaded": _tts_model is not None,
+        "cloneLoaded": _clone_model is not None,
     }
 
 
@@ -176,6 +195,37 @@ def tts(req: TTSRequest):
         )
         if not results:
             raise HTTPException(status_code=500, detail="TTS returned no audio")
+        result = results[0]
+        sample_rate = int(getattr(model, "sample_rate", 24000))
+        data = wav_bytes(result.audio, sample_rate)
+
+    return Response(content=data, media_type="audio/wav")
+
+
+
+@app.post("/tts-clone")
+def tts_clone(req: CloneTTSRequest):
+    text = req.text.strip()
+    ref_text = req.ref_text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+    if not ref_text:
+        raise HTTPException(status_code=400, detail="reference transcript is required")
+    if not req.ref_audio:
+        raise HTTPException(status_code=400, detail="reference audio path is required")
+
+    with _clone_lock:
+        model = load_clone_tts()
+        results = list(
+            model.generate(
+                text=text,
+                language=req.language or "Auto",
+                ref_audio=req.ref_audio,
+                ref_text=ref_text,
+            )
+        )
+        if not results:
+            raise HTTPException(status_code=500, detail="voice clone returned no audio")
         result = results[0]
         sample_rate = int(getattr(model, "sample_rate", 24000))
         data = wav_bytes(result.audio, sample_rate)
