@@ -128,7 +128,14 @@ async function warmCloneProfile({ force = false } = {}) {
     throw new Error('My Voice needs a reference recording and exact transcript first.');
   }
 
-  const key = [profile.createdAt || '', profile.refText || '', profile.audioPath || ''].join('|');
+  const currentSettings = loadSettings();
+  const naturalize = (currentSettings.cloneStyle || 'natural') !== 'reference';
+  const key = [
+    profile.createdAt || '',
+    profile.refText || '',
+    profile.audioPath || '',
+    naturalize ? 'natural' : 'reference'
+  ].join('|');
   if (!force && cloneWarmKey === key && await qwenRuntime.healthy(400)) return true;
   if (cloneWarmup) return cloneWarmup;
 
@@ -138,7 +145,8 @@ async function warmCloneProfile({ force = false } = {}) {
     await ensureQwenReady();
     await qwenRuntime.prepareClone({
       refAudio: profile.audioPath,
-      refText: profile.refText
+      refText: profile.refText,
+      naturalize
     });
     cloneWarmKey = key;
     status('My Voice ready in ' + ((Date.now() - started) / 1000).toFixed(1) + ' s.', 'ok');
@@ -171,7 +179,8 @@ async function synthesizeSelected(text, settings, prosody = {}) {
     const request = {
       language: selectedOutputLanguage(settings),
       refAudio: profile.audioPath,
-      refText: profile.refText
+      refText: profile.refText,
+      naturalize: (settings.cloneStyle || 'natural') !== 'reference'
     };
     try {
       return await qwenRuntime.synthesizeClone(text, request);
@@ -353,7 +362,12 @@ function registerIpc() {
     };
     const testText = String(text || defaultTests[outputLanguage] || defaultTests.English);
     if ((settings.ttsEngine || 'aivis') === 'clone') {
-      status('Test voice: My Voice clone (' + outputLanguage + ').', 'info');
+      status(
+        'Test voice: My Voice — ' +
+        ((settings.cloneStyle || 'natural') === 'reference' ? 'match reference' : 'natural delivery') +
+        ' (' + outputLanguage + ').',
+        'info'
+      );
     } else if ((settings.ttsEngine || 'aivis') === 'qwen') {
       status(
         'Test voice: Qwen multilingual — ' +
@@ -542,9 +556,9 @@ function registerIpc() {
 
       if ((settings.ttsEngine || 'aivis') === 'clone') {
         status(
-          'TTS engine: My Voice clone (' +
-          selectedOutputLanguage(settings) +
-          ').',
+          'TTS engine: My Voice — ' +
+          ((settings.cloneStyle || 'natural') === 'reference' ? 'match reference' : 'natural delivery') +
+          ' (' + selectedOutputLanguage(settings) + ').',
           'info'
         );
       } else if ((settings.ttsEngine || 'aivis') === 'qwen') {
@@ -574,6 +588,7 @@ function registerIpc() {
           language: selectedOutputLanguage(settings),
           refAudio: profile.audioPath,
           refText: profile.refText,
+          naturalize: (settings.cloneStyle || 'natural') !== 'reference',
           onFirstAudio: () => {
             if (firstAudioLogged) return;
             firstAudioLogged = true;
