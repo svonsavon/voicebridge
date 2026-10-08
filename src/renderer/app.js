@@ -119,9 +119,11 @@ async function saveLiveVoiceSettings() {
   };
   settings = await window.voiceBridge.saveSettings(patch);
 
-  const engineLabel = patch.ttsEngine === 'qwen'
-    ? 'Qwen multilingual — ' + patch.qwenVoice
-    : 'AivisSpeech';
+  const engineLabel = patch.ttsEngine === 'clone'
+    ? 'My Voice'
+    : patch.ttsEngine === 'qwen'
+      ? 'Qwen multilingual — ' + patch.qwenVoice
+      : 'AivisSpeech';
   log(
     'Voice route updated: ' +
     patch.inputLanguage + ' → ' +
@@ -135,8 +137,33 @@ function updateVoiceEngineUi() {
   const engine = $('ttsEngine')?.value || 'aivis';
   const qwen = $('qwenVoice')?.closest('label');
   const aivis = $('speakerId')?.closest('label');
+  const clone = $('myVoiceSetup');
   if (qwen) qwen.classList.toggle('hidden', engine !== 'qwen');
   if (aivis) aivis.classList.toggle('hidden', engine !== 'aivis');
+  if (clone) clone.classList.toggle('hidden', engine !== 'clone');
+}
+
+async function refreshVoiceProfile() {
+  const status = $('voiceProfileStatus');
+  if (!status || !window.voiceBridge.getVoiceProfile) return;
+
+  try {
+    const profile = await window.voiceBridge.getVoiceProfile();
+    if (profile?.configured) {
+      status.textContent = 'My Voice saved';
+      status.className = 'badge on';
+      if ($('voiceReferenceText') && !$('voiceReferenceText').value) {
+        $('voiceReferenceText').value = profile.refText || '';
+      }
+    } else {
+      status.textContent = 'No personal voice saved';
+      status.className = 'badge off';
+    }
+  } catch (err) {
+    status.textContent = 'Voice profile unavailable';
+    status.className = 'badge off';
+    log('Could not load My Voice profile: ' + err.message, 'warn');
+  }
 }
 
 async function refreshMicrophones({ requestPermission = false } = {}) {
@@ -561,6 +588,28 @@ $('microphoneDevice')?.addEventListener('change', async () => {
   log('Microphone selected: ' + label + '. Restart listening to apply the change.', 'ok');
 });
 
+$('chooseVoiceSample')?.addEventListener('click', async () => {
+  const refText = $('voiceReferenceText')?.value?.trim() || '';
+  if (!refText) {
+    log('Type the exact transcript of your reference recording first.', 'warn');
+    return;
+  }
+
+  try {
+    const profile = await window.voiceBridge.importVoiceProfile(refText);
+    if (profile?.canceled) return;
+
+    $('voiceProfileStatus').textContent = 'My Voice saved';
+    $('voiceProfileStatus').className = 'badge on';
+    $('ttsEngine').value = 'clone';
+    updateVoiceEngineUi();
+    await saveLiveVoiceSettings();
+    log('Personal voice reference is ready.', 'ok');
+  } catch (err) {
+    log('Could not create My Voice profile: ' + err.message, 'error');
+  }
+});
+
 $('ttsEngine')?.addEventListener('change', async () => {
   updateVoiceEngineUi();
   try { await saveLiveVoiceSettings(); }
@@ -629,6 +678,7 @@ navigator.mediaDevices?.addEventListener?.('devicechange', () => {
   const state = await window.voiceBridge.getState();
   updateMuteUi(state);
   updateVoiceEngineUi();
+  await refreshVoiceProfile();
   await refreshVoices();
 })();
 
