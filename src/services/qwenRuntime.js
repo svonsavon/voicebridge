@@ -165,13 +165,21 @@ async function synthesizeCloneStream(
     refAudio,
     refText,
     onFirstAudio = () => {},
-    timeoutMs = 20_000
+    firstAudioTimeoutMs = 30_000,
+    stallTimeoutMs = 8_000
   } = {}
 ) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => {
-    try { controller.abort(new Error('TTS stream timed out.')); } catch {}
-  }, Math.max(5_000, Number(timeoutMs || 20_000)));
+  let watchdog = null;
+
+  const armWatchdog = (ms, message) => {
+    clearTimeout(watchdog);
+    watchdog = setTimeout(() => {
+      try { controller.abort(new Error(message)); } catch {}
+    }, Math.max(3_000, Number(ms)));
+  };
+
+  armWatchdog(firstAudioTimeoutMs, 'TTS stream did not produce first audio in time.');
 
   let response;
   try {
@@ -187,15 +195,15 @@ async function synthesizeCloneStream(
       signal: controller.signal
     });
   } catch (err) {
-    clearTimeout(timeout);
+    clearTimeout(watchdog);
     throw err;
   }
   if (!response.ok) {
-    clearTimeout(timeout);
+    clearTimeout(watchdog);
     throw new Error(`Qwen clone stream HTTP ${response.status}: ${await response.text()}`);
   }
   if (!response.body) {
-    clearTimeout(timeout);
+    clearTimeout(watchdog);
     throw new Error('Qwen clone stream returned no body.');
   }
 
@@ -226,6 +234,11 @@ async function synthesizeCloneStream(
         const { value, done } = await reader.read();
         if (done) break;
         if (!value?.byteLength) continue;
+
+        // Generation can legitimately run for a long time on long sentences.
+        // Only abort if it stops making progress.
+        armWatchdog(stallTimeoutMs, 'TTS stream stalled.');
+
         if (first) {
           first = false;
           try { onFirstAudio(); } catch {}
@@ -237,7 +250,7 @@ async function synthesizeCloneStream(
       rejectDone(err);
       throw err;
     } finally {
-      clearTimeout(timeout);
+      clearTimeout(watchdog);
       try { reader.releaseLock(); } catch {}
     }
   }
@@ -245,7 +258,7 @@ async function synthesizeCloneStream(
   const stream = Readable.from(chunks());
 
   const cancel = (reason = 'interrupted') => {
-    clearTimeout(timeout);
+    clearTimeout(watchdog);
     const err = new Error(reason);
     err.code = 'VOICEBRIDGE_INTERRUPTED';
     rejectDone(err);
