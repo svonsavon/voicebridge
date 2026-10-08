@@ -109,10 +109,56 @@ def strip_thinking(text: str) -> str:
     return text.strip().strip('"').strip()
 
 
-def wav_bytes(audio, sample_rate: int) -> bytes:
+def generation_limits(text: str):
+    # VoiceBridge utterances are short conversational turns. Qwen3-TTS runs at
+    # roughly 12.5 codec tokens/sec; this cap leaves generous headroom while
+    # preventing the known no-EOS runaway from generating minutes of garbage.
+    chars = max(1, len(text.strip()))
+    max_tokens = min(320, max(80, chars * 5))
+    max_duration = min(30.0, max(6.0, chars * 0.35 + 5.0))
+    return max_tokens, max_duration
+
+
+def validate_generated_audio(audio, sample_rate: int, text: str, token_count: int = 0, max_tokens: int = 0):
     samples = np.asarray(audio, dtype=np.float32).reshape(-1)
     if samples.size == 0:
-        raise ValueError("TTS returned empty audio")
+        raise HTTPException(status_code=422, detail="UNSAFE_AUDIO: TTS returned empty audio")
+    if not np.all(np.isfinite(samples)):
+        raise HTTPException(status_code=422, detail="UNSAFE_AUDIO: TTS returned NaN/Inf samples")
+
+    duration = samples.size / float(sample_rate)
+    _, max_duration = generation_limits(text)
+    if duration > max_duration:
+        raise HTTPException(
+            status_code=422,
+            detail=f"RUNAWAY_AUDIO: generated {duration:.1f}s for a short utterance (limit {max_duration:.1f}s)"
+        )
+
+    if max_tokens and token_count >= max_tokens - 1:
+        raise HTTPException(
+            status_code=422,
+            detail=f"RUNAWAY_AUDIO: generation hit token cap ({token_count}/{max_tokens})"
+        )
+
+    abs_samples = np.abs(samples)
+    peak = float(abs_samples.max())
+    rms = float(np.sqrt(np.mean(samples * samples)))
+    clip_ratio = float(np.mean(abs_samples >= 0.999))
+
+    if peak > 1.25 or rms > 0.45 or clip_ratio > 0.01:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "UNSAFE_AUDIO: abnormal output level "
+                f"(peak={peak:.3f}, rms={rms:.3f}, clipped={clip_ratio:.2%})"
+            )
+        )
+
+    return samples
+
+
+def wav_bytes(audio, sample_rate: int, text: str = "", token_count: int = 0, max_tokens: int = 0) -> bytes:
+    samples = validate_generated_audio(audio, sample_rate, text, token_count, max_tokens)
     samples = np.clip(samples, -1.0, 1.0)
     pcm = (samples * 32767.0).astype("<i2").tobytes()
 
@@ -207,6 +253,7 @@ def tts(req: TTSRequest):
     if req.voice not in voice_ids:
         raise HTTPException(status_code=400, detail=f"unknown voice: {req.voice}")
 
+    max_tokens, _ = generation_limits(text)
     with _tts_lock:
         model = load_tts()
         results = list(
@@ -214,13 +261,15 @@ def tts(req: TTSRequest):
                 text=text,
                 speaker=req.voice,
                 language=req.language or "Auto",
+                max_tokens=max_tokens,
             )
         )
         if not results:
             raise HTTPException(status_code=500, detail="TTS returned no audio")
         result = results[0]
-        sample_rate = int(getattr(model, "sample_rate", 24000))
-        data = wav_bytes(result.audio, sample_rate)
+        sample_rate = int(getattr(result, "sample_rate", getattr(model, "sample_rate", 24000)))
+        token_count = int(getattr(result, "token_count", 0) or 0)
+        data = wav_bytes(result.audio, sample_rate, text, token_count, max_tokens)
 
     return Response(content=data, media_type="audio/wav")
 
@@ -266,6 +315,7 @@ def tts_clone(req: CloneTTSRequest):
     if not req.ref_audio:
         raise HTTPException(status_code=400, detail="reference audio path is required")
 
+    max_tokens, _ = generation_limits(text)
     with _clone_lock:
         model = load_clone_tts()
         results = list(
@@ -274,13 +324,15 @@ def tts_clone(req: CloneTTSRequest):
                 language=req.language or "Auto",
                 ref_audio=req.ref_audio,
                 ref_text=ref_text,
+                max_tokens=max_tokens,
             )
         )
         if not results:
             raise HTTPException(status_code=500, detail="voice clone returned no audio")
         result = results[0]
-        sample_rate = int(getattr(model, "sample_rate", 24000))
-        data = wav_bytes(result.audio, sample_rate)
+        sample_rate = int(getattr(result, "sample_rate", getattr(model, "sample_rate", 24000)))
+        token_count = int(getattr(result, "token_count", 0) or 0)
+        data = wav_bytes(result.audio, sample_rate, text, token_count, max_tokens)
 
     return Response(content=data, media_type="audio/wav")
 
