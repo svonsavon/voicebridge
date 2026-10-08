@@ -106,7 +106,7 @@ async function ensureServer(onLog = () => {}) {
   };
 }
 
-async function transcribe(wavBytes, language = 'en') {
+async function transcribe(wavBytes, language = 'en', { translateToEnglish = false } = {}) {
   const form = new FormData();
   const blob = new Blob([Buffer.from(wavBytes)], { type: 'audio/wav' });
   form.append('file', blob, 'utterance.wav');
@@ -114,6 +114,8 @@ async function transcribe(wavBytes, language = 'en') {
   form.append('response_format', 'json');
   form.append('no_timestamps', 'true');
   form.append('suppress_nst', 'true');
+  form.append('translate', translateToEnglish ? 'true' : 'false');
+  form.append('token_timestamps', 'false');
   if (language) form.append('language', language);
 
   const response = await fetch(`${BASE_URL}/inference`, {
