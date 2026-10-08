@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import gc
 import io
 import re
 import threading
@@ -57,6 +58,20 @@ class CloneTTSRequest(BaseModel):
     ref_text: str
 
 
+class PrepareCloneRequest(BaseModel):
+    ref_audio: str
+    ref_text: str
+
+
+def release_mlx_cache():
+    gc.collect()
+    try:
+        import mlx.core as mx
+        mx.clear_cache()
+    except Exception:
+        pass
+
+
 def load_translation():
     global _translation_model, _translation_tokenizer
     if _translation_model is None:
@@ -66,16 +81,24 @@ def load_translation():
 
 
 def load_tts():
-    global _tts_model
+    global _tts_model, _clone_model
+    # The two Qwen TTS checkpoints are each large. Keep only the active one
+    # resident so switching from presets to My Voice does not double memory use.
     if _tts_model is None:
+        if _clone_model is not None:
+            _clone_model = None
+            release_mlx_cache()
         from mlx_audio.tts.utils import load_model
         _tts_model = load_model(TTS_MODEL)
     return _tts_model
 
 
 def load_clone_tts():
-    global _clone_model
+    global _clone_model, _tts_model
     if _clone_model is None:
+        if _tts_model is not None:
+            _tts_model = None
+            release_mlx_cache()
         from mlx_audio.tts.utils import load_model
         _clone_model = load_model(CLONE_MODEL)
     return _clone_model
@@ -201,6 +224,35 @@ def tts(req: TTSRequest):
 
     return Response(content=data, media_type="audio/wav")
 
+
+
+@app.post("/prepare-clone")
+def prepare_clone(req: PrepareCloneRequest):
+    if not req.ref_audio:
+        raise HTTPException(status_code=400, detail="reference audio path is required")
+    if not req.ref_text.strip():
+        raise HTTPException(status_code=400, detail="reference transcript is required")
+
+    with _clone_lock:
+        model = load_clone_tts()
+
+        # Prime MLX-Audio's built-in ICL reference cache without synthesizing
+        # a full phrase. This moves reference encoding off the first live turn.
+        try:
+            from mlx_audio.utils import load_audio
+            ref_audio = load_audio(req.ref_audio, sample_rate=model.sample_rate)
+            model._prepare_icl_generation_inputs(
+                text=".",
+                ref_audio=ref_audio,
+                ref_text=req.ref_text.strip(),
+                language="auto",
+            )
+        except Exception:
+            # Model warm-up still succeeded even if a future MLX-Audio version
+            # changes the private cache-prep helper.
+            pass
+
+    return {"ok": True}
 
 
 @app.post("/tts-clone")
