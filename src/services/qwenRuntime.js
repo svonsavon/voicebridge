@@ -168,7 +168,8 @@ async function prepareClone({ refAudio, refText, naturalize = true } = {}) {
     body: JSON.stringify({
       ref_audio: refAudio,
       ref_text: refText,
-      naturalize
+      naturalize,
+      expressive
     })
   });
   return !!data.ok;
@@ -181,6 +182,7 @@ async function synthesizeCloneStream(
     refAudio,
     refText,
     naturalize = true,
+    expressive = false,
     onFirstAudio = () => {},
     firstAudioTimeoutMs = 30_000,
     stallTimeoutMs = 8_000
@@ -210,6 +212,7 @@ async function synthesizeCloneStream(
         ref_audio: refAudio,
         ref_text: refText,
         naturalize,
+        expressive,
         request_id: requestId
       }),
       signal: controller.signal
@@ -303,7 +306,10 @@ async function synthesizeCloneStream(
   };
 }
 
-async function synthesizeClone(text, { language = 'Auto', refAudio, refText, naturalize = true } = {}) {
+async function synthesizeClone(
+  text,
+  { language = 'Auto', refAudio, refText, naturalize = true, expressive = false } = {}
+) {
   const response = await fetch(`${BASE_URL}/tts-clone`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
