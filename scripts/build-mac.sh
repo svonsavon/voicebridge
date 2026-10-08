@@ -18,8 +18,11 @@ bash scripts/build-hotkey.sh
 # without re-downloading model weights on every development rebuild.
 QWEN_ROOT="$HOME/Library/Application Support/VoiceBridge/qwen-runtime"
 if [[ -d "$QWEN_ROOT" && -f "runtime/qwen_server.py" ]]; then
+  # A previously launched local runtime can survive long enough to make the
+  # rebuilt app reconnect to stale server code. Stop it before syncing.
+  pkill -f "$QWEN_ROOT/qwen_server.py" >/dev/null 2>&1 || true
   cp "runtime/qwen_server.py" "$QWEN_ROOT/qwen_server.py"
-  echo "Synced local Qwen runtime server."
+  echo "Stopped stale Qwen runtime and synced local server."
 fi
 
 if [[ -x "$QWEN_ROOT/.venv/bin/python" ]]; then
