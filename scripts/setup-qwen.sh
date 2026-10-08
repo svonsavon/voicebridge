@@ -56,6 +56,18 @@ for model in models:
 print("Qwen runtime is installed.")
 PY
 
+SPEAKER_DIR="$ROOT/models"
+SPEAKER_MODEL="$SPEAKER_DIR/wespeaker_en_voxceleb_resnet34.onnx"
+mkdir -p "$SPEAKER_DIR"
+if [[ ! -f "$SPEAKER_MODEL" ]]; then
+  echo
+  echo "Downloading lightweight speaker-verification model..."
+  curl -L --fail --retry 2 \
+    "https://huggingface.co/csukuangfj/speaker-embedding-models/resolve/main/wespeaker_en_voxceleb_resnet34.onnx" \
+    -o "$SPEAKER_MODEL.tmp"
+  mv "$SPEAKER_MODEL.tmp" "$SPEAKER_MODEL"
+fi
+
 echo
 echo "Installed at: $ROOT"
 echo "VoiceBridge will start it automatically when multilingual features are used."
