@@ -15,6 +15,7 @@ const defaults = {
   qwenVoice: 'Ryan',
   speakerVerificationEnabled: true,
   speakerVerificationThreshold: 0.45,
+  adaptiveEndpointEnabled: true,
   speechSilenceMs: 650,
   speechMinMs: 280,
   speechMaxMs: 12000,
