@@ -65,11 +65,13 @@ class CloneTTSRequest(BaseModel):
     language: str = "Auto"
     ref_audio: str
     ref_text: str
+    naturalize: bool = True
 
 
 class PrepareCloneRequest(BaseModel):
     ref_audio: str
     ref_text: str
+    naturalize: bool = True
 
 
 def release_mlx_cache():
@@ -437,20 +439,25 @@ def prepare_clone(req: PrepareCloneRequest):
     with _clone_lock:
         model = load_clone_tts()
 
-        # Prime MLX-Audio's built-in ICL reference cache without synthesizing
-        # a full phrase. This moves reference encoding off the first live turn.
         try:
             from mlx_audio.utils import load_audio
             ref_audio = load_audio(req.ref_audio, sample_rate=model.sample_rate)
-            model._prepare_icl_generation_inputs(
-                text=".",
-                ref_audio=ref_audio,
-                ref_text=req.ref_text.strip(),
-                language="auto",
-            )
+
+            if req.naturalize:
+                # Natural mode uses only the speaker embedding. Warm the speaker
+                # encoder without conditioning on the reference performance.
+                model.extract_speaker_embedding(ref_audio)
+            else:
+                # Reference-match mode keeps full ICL conditioning.
+                model._prepare_icl_generation_inputs(
+                    text=".",
+                    ref_audio=ref_audio,
+                    ref_text=req.ref_text.strip(),
+                    language="auto",
+                )
         except Exception:
-            # Model warm-up still succeeded even if a future MLX-Audio version
-            # changes the private cache-prep helper.
+            # Warm-up is an optimization only; live generation remains the
+            # source of truth if MLX-Audio internals change.
             pass
 
     return {"ok": True}
@@ -463,7 +470,7 @@ def tts_clone_stream(req: CloneTTSRequest):
     ref_text = req.ref_text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="text is required")
-    if not ref_text:
+    if not ref_text and not req.naturalize:
         raise HTTPException(status_code=400, detail="reference transcript is required")
     if not req.ref_audio:
         raise HTTPException(status_code=400, detail="reference audio path is required")
@@ -482,7 +489,7 @@ def tts_clone_stream(req: CloneTTSRequest):
                 text=text,
                 language=req.language or "Auto",
                 ref_audio=req.ref_audio,
-                ref_text=ref_text,
+                ref_text=None if req.naturalize else ref_text,
                 max_tokens=max_tokens,
                 stream=True,
                 streaming_interval=0.32,
@@ -530,7 +537,7 @@ def tts_clone(req: CloneTTSRequest):
                 text=text,
                 language=req.language or "Auto",
                 ref_audio=req.ref_audio,
-                ref_text=ref_text,
+                ref_text=None if req.naturalize else ref_text,
                 max_tokens=max_tokens,
             )
         )
