@@ -24,6 +24,9 @@ let rmsFrames = 0;
 let peakRms = 0;
 let noiseFloor = 0.0015;
 let hotFrames = 0;
+let onsetHotMs = 0;
+let voicedMs = 0;
+let utteranceNoiseFloor = 0.0015;
 let pcmFramesSeen = 0;
 let processedFramesSeen = 0;
 let remoteMuted = false;
@@ -238,6 +241,9 @@ function resetUtterance() {
   rmsFrames = 0;
   peakRms = 0;
   hotFrames = 0;
+  onsetHotMs = 0;
+  voicedMs = 0;
+  utteranceNoiseFloor = noiseFloor;
 }
 
 function rmsOf(samples) {
@@ -284,18 +290,44 @@ async function finalizeUtterance() {
   if (!speechActive) return;
   const utteranceChunks = chunks;
   const durationMs = speechMs;
+  const actualVoicedMs = voicedMs;
   const avgRms = rmsFrames ? sumRms / rmsFrames : 0;
   const peak = peakRms;
+  const baseline = Math.max(0.0001, utteranceNoiseFloor);
+  const snrDb = 20 * Math.log10(Math.max(avgRms, 0.0001) / baseline);
+  const voicedRatio = durationMs > 0 ? actualVoicedMs / durationMs : 0;
   resetUtterance();
 
   const minimum = Number(settings.speechMinMs || 280);
-  if (durationMs < minimum || muted) return;
+  const minimumVoiced = Math.max(180, Math.min(320, minimum * 0.65));
+
+  if (
+    durationMs < minimum ||
+    actualVoicedMs < minimumVoiced ||
+    voicedRatio < 0.22 ||
+    snrDb < 5.5 ||
+    muted
+  ) {
+    if (!muted) {
+      log(
+        'Ignored weak/non-speech trigger (' +
+        Math.round(actualVoicedMs) + ' ms voiced, ' +
+        Math.round(voicedRatio * 100) + '% voiced, ' +
+        snrDb.toFixed(1) + ' dB SNR).',
+        'info'
+      );
+    }
+    return;
+  }
 
   const pcm = flatten(utteranceChunks);
   const wav = encodeWav(pcm, captureSampleRate || 48000);
   try {
     await window.voiceBridge.processUtterance(wav, {
       durationMs,
+      voicedMs: actualVoicedMs,
+      voicedRatio,
+      snrDb,
       avgRms,
       peakRms: peak
     });
@@ -335,11 +367,22 @@ function handlePcm(samples, sampleRate = captureSampleRate || 48000) {
   if (preRoll.length > maxPreRollFrames) preRoll.shift();
 
   if (!speechActive) {
-    hotFrames = hot ? hotFrames + 1 : Math.max(0, hotFrames - 1);
-    if (hotFrames >= 2) {
+    if (hot) {
+      hotFrames += 1;
+      onsetHotMs += frameMs;
+    } else {
+      hotFrames = 0;
+      onsetHotMs = Math.max(0, onsetHotMs - frameMs * 2);
+    }
+
+    // Require a real onset rather than two individual hot frames. This rejects
+    // keyboard taps, desk bumps, breaths, and other impulse noise before Whisper.
+    if (onsetHotMs >= 90) {
       speechActive = true;
       chunks = preRoll.slice();
-      speechMs = preRoll.length * frameMs;
+      speechMs = onsetHotMs;
+      voicedMs = onsetHotMs;
+      utteranceNoiseFloor = Math.max(0.0001, noiseFloor);
       sumRms = rms;
       rmsFrames = 1;
       peakRms = rms;
@@ -353,6 +396,8 @@ function handlePcm(samples, sampleRate = captureSampleRate || 48000) {
   sumRms += rms;
   rmsFrames += 1;
   peakRms = Math.max(peakRms, rms);
+
+  if (hot) voicedMs += frameMs;
 
   if (rms < threshold * 0.7) silenceMs += frameMs;
   else silenceMs = 0;
