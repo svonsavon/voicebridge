@@ -22,6 +22,29 @@ if [[ -d "$QWEN_ROOT" && -f "runtime/qwen_server.py" ]]; then
   echo "Synced local Qwen runtime server."
 fi
 
+if [[ -x "$QWEN_ROOT/.venv/bin/python" ]]; then
+  if ! "$QWEN_ROOT/.venv/bin/python" -c "import sherpa_onnx" >/dev/null 2>&1; then
+    echo "Installing lightweight local speaker verifier..."
+    "$QWEN_ROOT/.venv/bin/python" -m pip install "sherpa-onnx"
+  fi
+
+  SPEAKER_DIR="$QWEN_ROOT/models"
+  SPEAKER_MODEL="$SPEAKER_DIR/wespeaker_en_voxceleb_resnet34.onnx"
+  mkdir -p "$SPEAKER_DIR"
+  if [[ ! -f "$SPEAKER_MODEL" ]]; then
+    echo "Downloading 26.5 MB speaker-verification model..."
+    if curl -L --fail --retry 2 \
+      "https://huggingface.co/csukuangfj/speaker-embedding-models/resolve/main/wespeaker_en_voxceleb_resnet34.onnx" \
+      -o "$SPEAKER_MODEL.tmp"; then
+      mv "$SPEAKER_MODEL.tmp" "$SPEAKER_MODEL"
+      echo "Installed speaker-verification model."
+    else
+      rm -f "$SPEAKER_MODEL.tmp"
+      echo "Warning: speaker model download failed; Only my voice will fail open with a warning."
+    fi
+  fi
+fi
+
 WHISPER_MODELS="$HOME/Library/Application Support/VoiceBridge/runtime/models"
 VAD_MODEL="$WHISPER_MODELS/ggml-silero-v6.2.0.bin"
 if [[ -d "$WHISPER_MODELS" && ! -f "$VAD_MODEL" ]]; then
