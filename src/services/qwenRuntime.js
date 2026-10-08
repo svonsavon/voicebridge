@@ -146,13 +146,14 @@ async function synthesize(text, { language = 'Auto', voice = 'Ryan' } = {}) {
   return Buffer.from(await response.arrayBuffer());
 }
 
-async function prepareClone({ refAudio, refText } = {}) {
+async function prepareClone({ refAudio, refText, naturalize = true } = {}) {
   const data = await requestJson('/prepare-clone', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       ref_audio: refAudio,
-      ref_text: refText
+      ref_text: refText,
+      naturalize
     })
   });
   return !!data.ok;
@@ -164,6 +165,7 @@ async function synthesizeCloneStream(
     language = 'Auto',
     refAudio,
     refText,
+    naturalize = true,
     onFirstAudio = () => {},
     firstAudioTimeoutMs = 30_000,
     stallTimeoutMs = 8_000
@@ -190,7 +192,8 @@ async function synthesizeCloneStream(
         text,
         language,
         ref_audio: refAudio,
-        ref_text: refText
+        ref_text: refText,
+        naturalize
       }),
       signal: controller.signal
     });
@@ -276,7 +279,7 @@ async function synthesizeCloneStream(
   };
 }
 
-async function synthesizeClone(text, { language = 'Auto', refAudio, refText } = {}) {
+async function synthesizeClone(text, { language = 'Auto', refAudio, refText, naturalize = true } = {}) {
   const response = await fetch(`${BASE_URL}/tts-clone`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -284,7 +287,8 @@ async function synthesizeClone(text, { language = 'Auto', refAudio, refText } = 
       text,
       language,
       ref_audio: refAudio,
-      ref_text: refText
+      ref_text: refText,
+      naturalize
     })
   });
   if (!response.ok) throw new Error(`Qwen clone TTS HTTP ${response.status}: ${await response.text()}`);
