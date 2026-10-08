@@ -10,7 +10,7 @@ contextBridge.exposeInMainWorld('voiceBridge', {
   saveVoiceProfileTranscript: (refText) => ipcRenderer.invoke('voice:set-transcript', { refText }),
   prepareVoiceClone: () => ipcRenderer.invoke('voice:prepare-clone'),
   processUtterance: (wavBytes, prosody) => ipcRenderer.invoke('speech:process', { wavBytes, prosody }),
-  bargeIn: () => ipcRenderer.invoke('speech:barge-in'),
+  bargeIn: (wavBytes) => ipcRenderer.invoke('speech:barge-in', { wavBytes }),
   connectDiscord: () => ipcRenderer.invoke('discord:connect'),
   disconnectDiscord: () => ipcRenderer.invoke('discord:disconnect'),
   refreshVoices: () => ipcRenderer.invoke('tts:list-voices'),
