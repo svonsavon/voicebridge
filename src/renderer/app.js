@@ -27,6 +27,8 @@ let hotFrames = 0;
 let onsetHotMs = 0;
 let voicedMs = 0;
 let utteranceNoiseFloor = 0.0015;
+let hesitationCount = 0;
+let longestPauseMs = 0;
 let pcmFramesSeen = 0;
 let processedFramesSeen = 0;
 let remoteMuted = false;
@@ -86,6 +88,7 @@ async function loadSettings() {
   $('qwenVoice').value = settings.qwenVoice || 'Ryan';
   $('speakerVerificationEnabled').checked = settings.speakerVerificationEnabled !== false;
   $('speakerVerificationThreshold').value = settings.speakerVerificationThreshold ?? 0.45;
+  $('adaptiveEndpointEnabled').checked = settings.adaptiveEndpointEnabled !== false;
   $('speechSilenceMs').value = settings.speechSilenceMs || 650;
   $('speechMinMs').value = settings.speechMinMs || 280;
   $('vadSensitivity').value = settings.vadSensitivity || 2.4;
@@ -106,6 +109,7 @@ async function saveSettings() {
     aivisSpeakerId: $('speakerId').value,
     speakerVerificationEnabled: $('speakerVerificationEnabled').checked,
     speakerVerificationThreshold: Number($('speakerVerificationThreshold').value || 0.45),
+    adaptiveEndpointEnabled: $('adaptiveEndpointEnabled').checked,
     speechSilenceMs: Number($('speechSilenceMs').value || 650),
     speechMinMs: Number($('speechMinMs').value || 280),
     vadSensitivity: Number($('vadSensitivity').value || 2.8)
@@ -250,6 +254,8 @@ function resetUtterance() {
   onsetHotMs = 0;
   voicedMs = 0;
   utteranceNoiseFloor = noiseFloor;
+  hesitationCount = 0;
+  longestPauseMs = 0;
 }
 
 function rmsOf(samples) {
@@ -342,6 +348,30 @@ async function finalizeUtterance() {
   }
 }
 
+function adaptiveSilenceTargetMs() {
+  const configuredMax = Math.max(
+    350,
+    Math.min(2000, Number(settings.speechSilenceMs || 650))
+  );
+
+  if (settings.adaptiveEndpointEnabled === false) return configuredMax;
+
+  const voicedSeconds = Math.max(0, voicedMs / 1000);
+
+  // Fast for short, decisive replies; gradually more tolerant as a turn grows.
+  let target = 330 + Math.min(150, voicedSeconds * 32);
+
+  // If the user already paused and resumed, treat them as being in a more
+  // hesitant / thoughtful cadence and allow extra room for the next pause.
+  target += Math.min(220, hesitationCount * 110);
+
+  // A previously long recovered pause is strong evidence that this speaker
+  // naturally pauses mid-thought, so bias upward a little more.
+  if (longestPauseMs >= 260) target += 70;
+
+  return Math.min(configuredMax, Math.max(300, Math.round(target)));
+}
+
 function handlePcm(samples, sampleRate = captureSampleRate || 48000) {
   if (!listening) return;
 
@@ -405,10 +435,27 @@ function handlePcm(samples, sampleRate = captureSampleRate || 48000) {
 
   if (hot) voicedMs += frameMs;
 
-  if (rms < threshold * 0.7) silenceMs += frameMs;
-  else silenceMs = 0;
+  if (rms < threshold * 0.7) {
+    silenceMs += frameMs;
+    longestPauseMs = Math.max(longestPauseMs, silenceMs);
+  } else {
+    // A recovered pause of ~220 ms+ is likely a real hesitation rather than
+    // frame-level VAD flutter. Remember it so the next pause gets more room.
+    if (silenceMs >= 220) hesitationCount += 1;
+    silenceMs = 0;
+  }
 
-  if (silenceMs >= Number(settings.speechSilenceMs || 650) || speechMs >= Number(settings.speechMaxMs || 12000)) {
+  const endpointMs = adaptiveSilenceTargetMs();
+  if (silenceMs >= endpointMs || speechMs >= Number(settings.speechMaxMs || 12000)) {
+    if (settings.adaptiveEndpointEnabled !== false) {
+      log(
+        'Adaptive endpoint: ' +
+        Math.round(endpointMs) + ' ms pause' +
+        (hesitationCount ? ' after ' + hesitationCount + ' resumed pause' + (hesitationCount === 1 ? '' : 's') : '') +
+        '.',
+        'info'
+      );
+    }
     finalizeUtterance();
   }
 }
@@ -713,12 +760,22 @@ $('ttsEngine')?.addEventListener('change', async () => {
   }
 });
 
-for (const id of ['inputLanguage', 'outputLanguage', 'englishTranslationMode', 'qwenVoice', 'speakerId', 'speakerVerificationEnabled', 'speakerVerificationThreshold']) {
+for (const id of ['inputLanguage', 'outputLanguage', 'englishTranslationMode', 'qwenVoice', 'speakerId', 'speakerVerificationEnabled', 'speakerVerificationThreshold', 'adaptiveEndpointEnabled']) {
   $(id)?.addEventListener('change', async () => {
     try { await saveLiveVoiceSettings(); }
     catch (err) { log('Could not save voice route: ' + err.message, 'error'); }
   });
 }
+
+$('speechSilenceMs')?.addEventListener('change', async () => {
+  try {
+    const speechSilenceMs = Math.max(350, Number($('speechSilenceMs').value || 650));
+    settings = await window.voiceBridge.saveSettings({ speechSilenceMs });
+    log('Maximum endpoint pause set to ' + speechSilenceMs + ' ms.', 'ok');
+  } catch (err) {
+    log('Could not save endpoint timing: ' + err.message, 'error');
+  }
+});
 
 $('saveButton').addEventListener('click', saveSettings);
 $('refreshVoices').addEventListener('click', refreshVoices);
