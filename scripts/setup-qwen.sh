@@ -38,16 +38,17 @@ if [[ ! -x "$VENV/bin/python" ]]; then
 fi
 
 "$VENV/bin/python" -m pip install --upgrade pip wheel
-"$VENV/bin/python" -m pip install --upgrade   "fastapi>=0.115"   "uvicorn>=0.34"   "numpy>=2.0"   "mlx-lm>=0.25.2"   "mlx-audio>=0.3.0"   "huggingface_hub[hf_xet]>=0.30"
+"$VENV/bin/python" -m pip install --upgrade   "fastapi>=0.115"   "uvicorn>=0.34"   "numpy>=2.0"   "mlx-lm>=0.31.1"   "mlx-audio[tts]>=0.3.0"   "huggingface_hub[hf_xet]>=1.0"
 
 echo
-echo "Downloading the small local translation and TTS models..."
+echo "Downloading local translation, preset TTS, and personal voice-clone models..."
 "$VENV/bin/python" - <<'PY'
 from huggingface_hub import snapshot_download
 
 models = [
     "Qwen/Qwen3-0.6B-MLX-4bit",
     "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-8bit",
+    "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit",
 ]
 for model in models:
     print("Downloading", model)
