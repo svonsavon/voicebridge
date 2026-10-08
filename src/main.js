@@ -25,6 +25,8 @@ let helperMuted = false;
 let manualMuted = false;
 let whisperReady = false;
 let processing = Promise.resolve();
+let cloneWarmup = null;
+let cloneWarmKey = '';
 
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -109,6 +111,36 @@ async function ensureQwenReady() {
   return true;
 }
 
+async function warmCloneProfile({ force = false } = {}) {
+  const profile = voiceProfile.getProfile();
+  if (!profile.configured) {
+    throw new Error('My Voice needs a reference recording and exact transcript first.');
+  }
+
+  const key = [profile.createdAt || '', profile.refText || '', profile.audioPath || ''].join('|');
+  if (!force && cloneWarmKey === key && await qwenRuntime.healthy(400)) return true;
+  if (cloneWarmup) return cloneWarmup;
+
+  cloneWarmup = (async () => {
+    const started = Date.now();
+    status('Warming My Voice…', 'busy');
+    await ensureQwenReady();
+    await qwenRuntime.prepareClone({
+      refAudio: profile.audioPath,
+      refText: profile.refText
+    });
+    cloneWarmKey = key;
+    status('My Voice ready in ' + ((Date.now() - started) / 1000).toFixed(1) + ' s.', 'ok');
+    return true;
+  })();
+
+  try {
+    return await cloneWarmup;
+  } finally {
+    cloneWarmup = null;
+  }
+}
+
 function selectedOutputLanguage(settings) {
   return languageRouter.outputLanguageName(
     settings.outputLanguage || 'same',
@@ -124,12 +156,21 @@ async function synthesizeSelected(text, settings, prosody = {}) {
     if (!profile.configured) {
       throw new Error('My Voice is selected, but no reference voice has been configured yet.');
     }
-    await ensureQwenReady();
-    return qwenRuntime.synthesizeClone(text, {
+    await warmCloneProfile();
+    const request = {
       language: selectedOutputLanguage(settings),
       refAudio: profile.audioPath,
       refText: profile.refText
-    });
+    };
+    try {
+      return await qwenRuntime.synthesizeClone(text, request);
+    } catch (err) {
+      status('My Voice TTS failed once; retrying local runtime…', 'warn');
+      cloneWarmKey = '';
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await warmCloneProfile({ force: true });
+      return qwenRuntime.synthesizeClone(text, request);
+    }
   }
 
   if (engine === 'qwen') {
@@ -183,6 +224,7 @@ function registerIpc() {
 
     status('Preparing personal voice reference…', 'busy');
     const profile = await voiceProfile.importReference(result.filePaths[0], transcript);
+    cloneWarmKey = '';
 
     if (profile.configured) status('My Voice reference saved locally.', 'ok');
     else status('Reference recording saved. Add its exact transcript to finish My Voice setup.', 'warn');
@@ -192,8 +234,14 @@ function registerIpc() {
 
   ipcMain.handle('voice:set-transcript', async (_, { refText } = {}) => {
     const profile = voiceProfile.setTranscript(refText);
+    cloneWarmKey = '';
     status('My Voice transcript saved. Personal voice is ready.', 'ok');
     return profile;
+  });
+
+  ipcMain.handle('voice:prepare-clone', async () => {
+    await warmCloneProfile();
+    return { ok: true };
   });
 
   ipcMain.handle('mute:set-manual', (_, muted) => {
@@ -271,11 +319,14 @@ function registerIpc() {
       const inputLanguage = settings.inputLanguage || settings.whisperLanguage || 'en';
       const outputLanguage = settings.outputLanguage || 'same';
 
+      const utteranceStarted = Date.now();
+      const transcribeStarted = Date.now();
       status('Transcribing locally…', 'busy');
       const rawText = await whisper.transcribe(
         wavBytes,
         languageRouter.whisperLanguage(inputLanguage)
       );
+      status('Transcription: ' + ((Date.now() - transcribeStarted) / 1000).toFixed(2) + ' s.', 'info');
       const filtered = cleanTranscript(rawText);
       if (filtered.removed.length) {
         status(`Ignored non-speech: ${filtered.removed.join(', ')}`, 'info');
@@ -297,6 +348,7 @@ function registerIpc() {
           inputLanguage,
           outputLanguage
         );
+        const translationStarted = Date.now();
         status(`Translating to ${request.target}…`, 'busy');
         spokenText = await qwenRuntime.translate(
           request.text,
@@ -304,6 +356,7 @@ function registerIpc() {
           request.target
         );
         translated = spokenText !== originalText;
+        status('Translation: ' + ((Date.now() - translationStarted) / 1000).toFixed(2) + ' s.', 'info');
         status(`${request.target}: ${spokenText}`, 'translation');
       }
 
@@ -325,7 +378,13 @@ function registerIpc() {
         status('TTS engine: AivisSpeech.', 'info');
       }
 
+      const ttsStarted = Date.now();
       const tts = await synthesizeSelected(spokenText, settings, prosody || {});
+      status(
+        'TTS: ' + ((Date.now() - ttsStarted) / 1000).toFixed(2) +
+        ' s. Total after phrase end: ' + ((Date.now() - utteranceStarted) / 1000).toFixed(2) + ' s.',
+        'info'
+      );
       if (!discordVoice.isConnected()) {
         status('Synthesized speech is ready, but Discord is not connected.', 'warn');
         return {
