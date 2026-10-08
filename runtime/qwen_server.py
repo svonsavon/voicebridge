@@ -433,7 +433,7 @@ def tts(req: TTSRequest):
 def prepare_clone(req: PrepareCloneRequest):
     if not req.ref_audio:
         raise HTTPException(status_code=400, detail="reference audio path is required")
-    if not req.ref_text.strip():
+    if not req.ref_text.strip() and not req.naturalize:
         raise HTTPException(status_code=400, detail="reference transcript is required")
 
     with _clone_lock:
@@ -524,7 +524,7 @@ def tts_clone(req: CloneTTSRequest):
     ref_text = req.ref_text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="text is required")
-    if not ref_text:
+    if not ref_text and not req.naturalize:
         raise HTTPException(status_code=400, detail="reference transcript is required")
     if not req.ref_audio:
         raise HTTPException(status_code=400, detail="reference audio path is required")
