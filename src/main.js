@@ -183,7 +183,8 @@ async function synthesizeSelected(text, settings, prosody = {}) {
       language: selectedOutputLanguage(settings),
       refAudio: profile.audioPath,
       refText: profile.refText,
-      naturalize: (settings.cloneStyle || 'natural') !== 'reference'
+      naturalize: (settings.cloneStyle || 'natural') !== 'reference',
+      expressive: settings.expressiveDeliveryEnabled === true
     };
     try {
       return await qwenRuntime.synthesizeClone(text, request);
@@ -226,7 +227,9 @@ function registerIpc() {
   ipcMain.handle('settings:get', () => loadSettings());
 
   ipcMain.handle('settings:save', (_, patch) => {
-    return saveSettings(patch || {});
+    const saved = saveSettings(patch || {});
+    discordVoice.setOutputGain(saved.discordOutputGainPercent ?? 100);
+    return saved;
   });
 
   ipcMain.handle('microphone:request', async () => {
@@ -396,6 +399,7 @@ function registerIpc() {
 
   ipcMain.handle('discord:connect', async () => {
     const settings = loadSettings({ includeToken: true });
+    discordVoice.setOutputGain(settings.discordOutputGainPercent ?? 100);
     const result = await discordVoice.connect({
       token: settings.discordToken,
       guildId: settings.guildId,
@@ -561,6 +565,7 @@ function registerIpc() {
         status(
           'TTS engine: My Voice — ' +
           ((settings.cloneStyle || 'natural') === 'reference' ? 'match reference' : 'natural delivery') +
+          (settings.expressiveDeliveryEnabled ? ' + expressive experiment' : '') +
           ' (' + selectedOutputLanguage(settings) + ').',
           'info'
         );
@@ -592,6 +597,7 @@ function registerIpc() {
           refAudio: profile.audioPath,
           refText: profile.refText,
           naturalize: (settings.cloneStyle || 'natural') !== 'reference',
+          expressive: settings.expressiveDeliveryEnabled === true,
           onFirstAudio: () => {
             if (firstAudioLogged) return;
             firstAudioLogged = true;
@@ -698,6 +704,7 @@ function registerIpc() {
 app.whenReady().then(async () => {
   registerIpc();
   manualMuted = false;
+  discordVoice.setOutputGain(loadSettings().discordOutputGainPercent ?? 100);
   await createWindow();
   await updater.initialize({ window: win, status });
   setTimeout(() => updater.check().catch(() => {}), 5000);
