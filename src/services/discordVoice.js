@@ -22,7 +22,52 @@ let connection = null;
 let player = null;
 let queue = [];
 let playing = false;
+let currentFfmpeg = null;
 let onStatus = () => {};
+
+function inspectWav(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 44) {
+    throw new Error('Refusing invalid synthesized audio: WAV is too small.');
+  }
+  if (buffer.toString('ascii', 0, 4) !== 'RIFF' || buffer.toString('ascii', 8, 12) !== 'WAVE') {
+    throw new Error('Refusing invalid synthesized audio: not a RIFF/WAVE file.');
+  }
+
+  let offset = 12;
+  let fmt = null;
+  let dataSize = null;
+
+  while (offset + 8 <= buffer.length) {
+    const id = buffer.toString('ascii', offset, offset + 4);
+    const size = buffer.readUInt32LE(offset + 4);
+    const dataStart = offset + 8;
+    if (dataStart + size > buffer.length) break;
+
+    if (id === 'fmt ' && size >= 16) {
+      fmt = {
+        channels: buffer.readUInt16LE(dataStart + 2),
+        sampleRate: buffer.readUInt32LE(dataStart + 4),
+        bitsPerSample: buffer.readUInt16LE(dataStart + 14)
+      };
+    } else if (id === 'data') {
+      dataSize = size;
+    }
+
+    offset = dataStart + size + (size % 2);
+  }
+
+  if (!fmt || dataSize == null || !fmt.channels || !fmt.sampleRate || !fmt.bitsPerSample) {
+    throw new Error('Refusing invalid synthesized audio: malformed WAV header.');
+  }
+
+  const bytesPerSecond = fmt.sampleRate * fmt.channels * (fmt.bitsPerSample / 8);
+  const durationSeconds = dataSize / bytesPerSecond;
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+    throw new Error('Refusing invalid synthesized audio: impossible duration.');
+  }
+
+  return { ...fmt, dataSize, durationSeconds };
+}
 
 function ffmpegPath() {
   let p = require('ffmpeg-static');
@@ -80,15 +125,34 @@ function wavToDiscordPcm(wavBuffer) {
     'pipe:1'
   ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
+  currentFfmpeg = ff;
   ff.stderr.on('data', (d) => onStatus({ level: 'warn', text: `ffmpeg: ${d.toString().trim()}` }));
   ff.on('error', (err) => onStatus({ level: 'error', text: `ffmpeg failed: ${err.message}` }));
+  ff.on('close', () => {
+    if (currentFfmpeg === ff) currentFfmpeg = null;
+  });
   Readable.from([wavBuffer]).pipe(ff.stdin);
   return ff.stdout;
 }
 
 function enqueue(wavBuffer) {
   if (!connection || !player) throw new Error('Discord is not connected.');
-  queue.push(Buffer.from(wavBuffer));
+
+  const wav = Buffer.from(wavBuffer);
+  if (wav.length > 12 * 1024 * 1024) {
+    throw new Error('Blocked synthesized audio larger than 12 MB.');
+  }
+
+  const info = inspectWav(wav);
+  if (info.durationSeconds > 35) {
+    throw new Error(
+      'Blocked runaway synthesized audio (' +
+      info.durationSeconds.toFixed(1) +
+      ' seconds).'
+    );
+  }
+
+  queue.push(wav);
   playNext();
 }
 
@@ -104,6 +168,8 @@ function playNext() {
 async function disconnect() {
   queue = [];
   playing = false;
+  try { currentFfmpeg?.kill('SIGKILL'); } catch {}
+  currentFfmpeg = null;
   try { player?.stop(true); } catch {}
   try { connection?.destroy(); } catch {}
   connection = null;
