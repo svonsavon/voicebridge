@@ -119,6 +119,19 @@
         </div>
       </div>
 
+      <div class="grid two" style="margin-top: 12px;">
+        <label class="checkbox-row">
+          <input id="speakerVerificationEnabled" type="checkbox" />
+          Only respond to my voice
+        </label>
+        <label>Voice-match threshold
+          <input id="speakerVerificationThreshold" type="number" min="0.30" max="0.75" step="0.01" />
+        </label>
+      </div>
+      <div class="hint">
+        Uses your saved My Voice reference locally to reject videos, roommates, and other speakers. Lower the threshold if it rejects you; raise it if other voices get through.
+      </div>
+
       <div class="hint" style="margin-top: 10px;">
         Translation runs only when the output language differs from the input. Qwen can speak English, Mandarin, and Japanese with the same selected voice.
       </div>
