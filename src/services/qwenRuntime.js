@@ -317,7 +317,8 @@ async function synthesizeClone(
       language,
       ref_audio: refAudio,
       ref_text: refText,
-      naturalize
+      naturalize,
+      expressive
     })
   });
   if (!response.ok) throw new Error(`Qwen clone TTS HTTP ${response.status}: ${await response.text()}`);
