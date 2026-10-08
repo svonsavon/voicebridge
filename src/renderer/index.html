@@ -106,6 +106,18 @@
         </label>
       </div>
 
+      <div class="grid two" style="margin-top: 12px;">
+        <label>My Voice delivery
+          <select id="cloneStyle">
+            <option value="natural">Natural — keep my voice, improve delivery</option>
+            <option value="reference">Match reference — copy my recorded cadence</option>
+          </select>
+        </label>
+      </div>
+      <div class="hint">
+        Natural mode uses your recording mainly for speaker identity, so Qwen can supply cleaner pronunciation, stress, rhythm, and sentence melody in the selected output language.
+      </div>
+
       <div id="myVoiceSetup" class="grid" style="margin-top: 12px;">
         <label>Exact transcript of your reference recording
           <textarea id="voiceReferenceText" rows="3" placeholder="Type exactly what you said in the recording."></textarea>
