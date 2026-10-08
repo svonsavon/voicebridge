@@ -8,6 +8,7 @@ const defaults = {
   microphoneDeviceId: '',
   inputLanguage: 'en',
   outputLanguage: 'same',
+  englishTranslationMode: 'fast',
   whisperLanguage: 'en',
   ttsEngine: 'aivis',
   aivisSpeakerId: '',
