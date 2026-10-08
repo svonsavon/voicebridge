@@ -155,6 +155,9 @@ async function refreshVoiceProfile() {
       if ($('voiceReferenceText') && !$('voiceReferenceText').value) {
         $('voiceReferenceText').value = profile.refText || '';
       }
+    } else if (profile?.hasAudio) {
+      status.textContent = 'Recording selected — add transcript';
+      status.className = 'badge off';
     } else {
       status.textContent = 'No personal voice saved';
       status.className = 'badge off';
@@ -588,6 +591,28 @@ $('microphoneDevice')?.addEventListener('change', async () => {
   log('Microphone selected: ' + label + '. Restart listening to apply the change.', 'ok');
 });
 
+$('voiceReferenceText')?.addEventListener('change', async () => {
+  const refText = $('voiceReferenceText').value.trim();
+  if (!refText) return;
+
+  try {
+    const profile = await window.voiceBridge.saveVoiceProfileTranscript(refText);
+    if (profile?.configured) {
+      $('voiceProfileStatus').textContent = 'My Voice saved';
+      $('voiceProfileStatus').className = 'badge on';
+      $('ttsEngine').value = 'clone';
+      updateVoiceEngineUi();
+      await saveLiveVoiceSettings();
+      log('Personal voice reference is ready.', 'ok');
+    }
+  } catch (err) {
+    // This is normal if the user types a transcript before selecting audio.
+    if (!String(err.message || '').includes('Choose a reference recording first')) {
+      log('Could not save voice transcript: ' + err.message, 'error');
+    }
+  }
+});
+
 $('chooseVoiceSample')?.addEventListener('click', async () => {
   const refText = $('voiceReferenceText')?.value?.trim() || '';
   if (!refText) {
@@ -599,12 +624,19 @@ $('chooseVoiceSample')?.addEventListener('click', async () => {
     const profile = await window.voiceBridge.importVoiceProfile(refText);
     if (profile?.canceled) return;
 
-    $('voiceProfileStatus').textContent = 'My Voice saved';
-    $('voiceProfileStatus').className = 'badge on';
-    $('ttsEngine').value = 'clone';
-    updateVoiceEngineUi();
-    await saveLiveVoiceSettings();
-    log('Personal voice reference is ready.', 'ok');
+    if (profile?.configured) {
+      $('voiceProfileStatus').textContent = 'My Voice saved';
+      $('voiceProfileStatus').className = 'badge on';
+      $('ttsEngine').value = 'clone';
+      updateVoiceEngineUi();
+      await saveLiveVoiceSettings();
+      log('Personal voice reference is ready.', 'ok');
+    } else {
+      $('voiceProfileStatus').textContent = 'Recording selected — add transcript';
+      $('voiceProfileStatus').className = 'badge off';
+      log('Reference recording selected. Enter the exact transcript to finish setup.', 'warn');
+      $('voiceReferenceText')?.focus();
+    }
   } catch (err) {
     log('Could not create My Voice profile: ' + err.message, 'error');
   }
