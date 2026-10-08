@@ -390,6 +390,64 @@ function registerIpc() {
       }
 
       const ttsStarted = Date.now();
+      const engine = settings.ttsEngine || 'aivis';
+
+      if (engine === 'clone' && discordVoice.isConnected()) {
+        const profile = voiceProfile.getProfile();
+        if (!profile.configured) {
+          throw new Error('My Voice is selected, but no reference voice has been configured yet.');
+        }
+
+        await warmCloneProfile();
+
+        let firstAudioLogged = false;
+        const streamed = await qwenRuntime.synthesizeCloneStream(spokenText, {
+          language: selectedOutputLanguage(settings),
+          refAudio: profile.audioPath,
+          refText: profile.refText,
+          onFirstAudio: () => {
+            if (firstAudioLogged) return;
+            firstAudioLogged = true;
+            status(
+              'TTS first audio: ' +
+              ((Date.now() - ttsStarted) / 1000).toFixed(2) +
+              ' s. Total to first audio: ' +
+              ((Date.now() - utteranceStarted) / 1000).toFixed(2) +
+              ' s.',
+              'ok'
+            );
+          }
+        });
+
+        discordVoice.enqueuePcmStream(streamed.stream, {
+          sampleRate: streamed.sampleRate,
+          channels: streamed.channels
+        });
+        status('Streaming My Voice to Discord.', 'ok');
+
+        try {
+          await streamed.completed;
+        } catch (err) {
+          status('My Voice stream ended unexpectedly: ' + (err.message || String(err)), 'error');
+          throw err;
+        }
+
+        status(
+          'TTS stream generation: ' +
+          ((Date.now() - ttsStarted) / 1000).toFixed(2) +
+          ' s. Audio started before generation completed.',
+          'info'
+        );
+
+        return {
+          text: originalText,
+          outputText: spokenText,
+          translated,
+          spoken: true,
+          streamed: true
+        };
+      }
+
       const tts = await synthesizeSelected(spokenText, settings, prosody || {});
       status(
         'TTS: ' + ((Date.now() - ttsStarted) / 1000).toFixed(2) +
