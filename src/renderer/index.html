@@ -71,7 +71,8 @@
         </label>
         <label>Voice engine
           <select id="ttsEngine">
-            <option value="qwen">Qwen multilingual</option>
+            <option value="clone">My Voice</option>
+            <option value="qwen">Qwen multilingual presets</option>
             <option value="aivis">AivisSpeech</option>
           </select>
         </label>
@@ -94,6 +95,19 @@
         <label>AivisSpeech voice/style
           <select id="speakerId"><option value="">Refresh voices…</option></select>
         </label>
+      </div>
+
+      <div id="myVoiceSetup" class="grid" style="margin-top: 12px;">
+        <label>Exact transcript of your reference recording
+          <textarea id="voiceReferenceText" rows="3" placeholder="Type exactly what you said in the recording."></textarea>
+        </label>
+        <div class="row">
+          <button id="chooseVoiceSample">Choose reference recording…</button>
+          <span id="voiceProfileStatus" class="badge off">No personal voice saved</span>
+        </div>
+        <div class="hint">
+          Use a clean single-speaker recording in your normal voice. VoiceBridge saves a normalized local copy for cloning.
+        </div>
       </div>
 
       <div class="hint" style="margin-top: 10px;">
