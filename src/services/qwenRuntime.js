@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { Readable } = require('node:stream');
 
 const HOST = '127.0.0.1';
 const PORT = 8321;
@@ -141,6 +142,66 @@ async function prepareClone({ refAudio, refText } = {}) {
   return !!data.ok;
 }
 
+async function synthesizeCloneStream(
+  text,
+  { language = 'Auto', refAudio, refText, onFirstAudio = () => {} } = {}
+) {
+  const response = await fetch(`${BASE_URL}/tts-clone-stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text,
+      language,
+      ref_audio: refAudio,
+      ref_text: refText
+    })
+  });
+  if (!response.ok) {
+    throw new Error(`Qwen clone stream HTTP ${response.status}: ${await response.text()}`);
+  }
+  if (!response.body) throw new Error('Qwen clone stream returned no body.');
+
+  const sampleRate = Number(response.headers.get('x-voicebridge-sample-rate') || 24000);
+  const channels = Number(response.headers.get('x-voicebridge-channels') || 1);
+  const reader = response.body.getReader();
+
+  let first = true;
+  let resolveDone;
+  let rejectDone;
+  const completed = new Promise((resolve, reject) => {
+    resolveDone = resolve;
+    rejectDone = reject;
+  });
+
+  async function* chunks() {
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (!value?.byteLength) continue;
+        if (first) {
+          first = false;
+          try { onFirstAudio(); } catch {}
+        }
+        yield Buffer.from(value);
+      }
+      resolveDone();
+    } catch (err) {
+      rejectDone(err);
+      throw err;
+    } finally {
+      try { reader.releaseLock(); } catch {}
+    }
+  }
+
+  return {
+    stream: Readable.from(chunks()),
+    sampleRate,
+    channels,
+    completed
+  };
+}
+
 async function synthesizeClone(text, { language = 'Auto', refAudio, refText } = {}) {
   const response = await fetch(`${BASE_URL}/tts-clone`, {
     method: 'POST',
@@ -171,6 +232,7 @@ module.exports = {
   translate,
   synthesize,
   prepareClone,
+  synthesizeCloneStream,
   synthesizeClone,
   shutdown,
   runtimeRoot
