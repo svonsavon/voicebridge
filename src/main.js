@@ -114,6 +114,9 @@ async function ensureQwenReady() {
     if (line.includes('Downloading') || line.includes('Loading')) {
       status('Qwen multilingual runtime is loading…', 'busy');
     }
+    if (line.includes('TTS_STREAM_ERROR:')) {
+      status(line.replace(/^\[qwen\]\s*/, ''), 'error');
+    }
     if (line.includes('exited')) {
       status('Qwen runtime stopped. VoiceBridge will attempt to restart it on the next phrase.', 'warn');
     }
@@ -621,7 +624,17 @@ function registerIpc() {
           if (turnIsStale(turnEpoch)) {
             return { skipped: 'barge-in' };
           }
-          status('My Voice stream ended unexpectedly: ' + (err.message || String(err)), 'error');
+
+          const message = String(err?.message || err || '');
+          if (/\bterminated\b/i.test(message)) {
+            status(
+              'My Voice stream connection ended early. See any TTS_STREAM_ERROR immediately above for the server-side cause.',
+              'error'
+            );
+            return { skipped: 'tts-stream-terminated' };
+          }
+
+          status('My Voice stream ended unexpectedly: ' + message, 'error');
           throw err;
         } finally {
           if (activeTtsCancel === streamed.cancel) activeTtsCancel = null;
