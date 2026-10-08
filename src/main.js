@@ -340,6 +340,57 @@ function registerIpc() {
     const task = processing.then(async () => {
       if (effectiveMuted()) return { skipped: 'muted' };
       const settings = loadSettings({ includeToken: true });
+
+      if (settings.speakerVerificationEnabled !== false && voicedMs >= 550) {
+        const profile = voiceProfile.getProfile();
+        if (profile.configured) {
+          const verifyStarted = Date.now();
+          try {
+            await ensureQwenReady();
+            const threshold = Math.max(
+              0.30,
+              Math.min(0.75, Number(settings.speakerVerificationThreshold ?? 0.45))
+            );
+            const verification = await qwenRuntime.verifySpeaker(wavBytes, {
+              refAudio: profile.audioPath,
+              threshold
+            });
+
+            if (!verification.skipped) {
+              const score = Number(verification.score || 0);
+              status(
+                'Speaker match: ' + score.toFixed(3) +
+                ' (threshold ' + threshold.toFixed(2) + ')' +
+                (verification.accepted ? ' ✓' : ' — rejected'),
+                verification.accepted ? 'ok' : 'info'
+              );
+            }
+
+            if (!verification.accepted) {
+              status('Ignored speech from a different speaker.', 'info');
+              return { skipped: 'speaker-mismatch', speakerScore: verification.score };
+            }
+
+            status(
+              'Speaker verification: ' +
+              ((Date.now() - verifyStarted) / 1000).toFixed(2) + ' s.',
+              'info'
+            );
+          } catch (err) {
+            status(
+              'Speaker verification unavailable; continuing without identity filter: ' +
+              (err.message || String(err)),
+              'warn'
+            );
+          }
+        } else {
+          status(
+            'Only-my-voice is enabled, but no My Voice reference is configured; continuing without identity filter.',
+            'warn'
+          );
+        }
+      }
+
       const inputLanguage = settings.inputLanguage || settings.whisperLanguage || 'en';
       const outputLanguage = settings.outputLanguage || 'same';
       const englishTranslationMode = settings.englishTranslationMode || 'fast';
