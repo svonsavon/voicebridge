@@ -170,6 +170,12 @@ async function synthesizeSelected(text, settings, prosody = {}) {
     try {
       return await qwenRuntime.synthesizeClone(text, request);
     } catch (err) {
+      const message = String(err?.message || err || '');
+      if (message.includes('RUNAWAY_AUDIO') || message.includes('UNSAFE_AUDIO')) {
+        status('Blocked corrupted My Voice output before playback.', 'error');
+        throw err;
+      }
+
       status('My Voice TTS failed once; retrying local runtime…', 'warn');
       cloneWarmKey = '';
       await new Promise((resolve) => setTimeout(resolve, 300));
