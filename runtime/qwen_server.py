@@ -2,19 +2,25 @@
 import argparse
 import gc
 import io
+import os
 import re
 import threading
 import wave
 
 import numpy as np
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 TRANSLATION_MODEL = "Qwen/Qwen3-0.6B-MLX-4bit"
 TTS_MODEL = "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-8bit"
 CLONE_MODEL = "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit"
+SPEAKER_MODEL = os.path.join(
+    os.path.dirname(__file__),
+    "models",
+    "wespeaker_en_voxceleb_resnet34.onnx",
+)
 
 VOICES = [
     {"id": "Ryan", "name": "Ryan", "nativeLanguage": "English"},
@@ -34,9 +40,12 @@ _translation_model = None
 _translation_tokenizer = None
 _tts_model = None
 _clone_model = None
+_speaker_extractor = None
+_speaker_reference_cache = {}
 _translation_lock = threading.Lock()
 _tts_lock = threading.Lock()
 _clone_lock = threading.Lock()
+_speaker_lock = threading.Lock()
 
 
 class TranslateRequest(BaseModel):
@@ -102,6 +111,103 @@ def load_clone_tts():
         from mlx_audio.tts.utils import load_model
         _clone_model = load_model(CLONE_MODEL)
     return _clone_model
+
+
+def load_speaker_extractor():
+    global _speaker_extractor
+    if _speaker_extractor is None:
+        if not os.path.exists(SPEAKER_MODEL):
+            raise HTTPException(
+                status_code=503,
+                detail="speaker verification model is not installed",
+            )
+        try:
+            import sherpa_onnx
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"sherpa-onnx is not installed: {exc}",
+            )
+
+        config = sherpa_onnx.SpeakerEmbeddingExtractorConfig(
+            model=SPEAKER_MODEL,
+            num_threads=2,
+            debug=False,
+            provider="cpu",
+        )
+        if not config.validate():
+            raise HTTPException(
+                status_code=500,
+                detail="invalid speaker embedding model configuration",
+            )
+        _speaker_extractor = sherpa_onnx.SpeakerEmbeddingExtractor(config)
+    return _speaker_extractor
+
+
+def read_wav_samples(data: bytes):
+    try:
+        with wave.open(io.BytesIO(data), "rb") as handle:
+            channels = handle.getnchannels()
+            sample_width = handle.getsampwidth()
+            sample_rate = handle.getframerate()
+            frames = handle.readframes(handle.getnframes())
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"invalid WAV audio: {exc}")
+
+    if sample_width == 2:
+        samples = np.frombuffer(frames, dtype="<i2").astype(np.float32) / 32768.0
+    elif sample_width == 1:
+        samples = (np.frombuffer(frames, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
+    elif sample_width == 4:
+        samples = np.frombuffer(frames, dtype="<i4").astype(np.float32) / 2147483648.0
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unsupported WAV sample width: {sample_width}",
+        )
+
+    if channels > 1:
+        samples = samples.reshape(-1, channels).mean(axis=1)
+
+    return np.ascontiguousarray(samples, dtype=np.float32), int(sample_rate)
+
+
+def speaker_embedding(samples, sample_rate: int):
+    extractor = load_speaker_extractor()
+    if samples.size < max(1, int(sample_rate * 0.25)):
+        raise HTTPException(status_code=422, detail="speaker sample is too short")
+
+    stream = extractor.create_stream()
+    stream.accept_waveform(sample_rate=sample_rate, waveform=samples)
+    stream.input_finished()
+    if not extractor.is_ready(stream):
+        raise HTTPException(status_code=422, detail="speaker sample is too short for embedding")
+
+    embedding = np.asarray(extractor.compute(stream), dtype=np.float32)
+    norm = float(np.linalg.norm(embedding))
+    if not np.isfinite(norm) or norm <= 0:
+        raise HTTPException(status_code=500, detail="invalid speaker embedding")
+    return embedding / norm
+
+
+def reference_speaker_embedding(path: str):
+    try:
+        stat = os.stat(path)
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=f"reference voice is unavailable: {exc}")
+
+    key = (path, stat.st_mtime_ns, stat.st_size)
+    cached = _speaker_reference_cache.get(key)
+    if cached is not None:
+        return cached
+
+    with open(path, "rb") as handle:
+        samples, sample_rate = read_wav_samples(handle.read())
+    embedding = speaker_embedding(samples, sample_rate)
+
+    _speaker_reference_cache.clear()
+    _speaker_reference_cache[key] = embedding
+    return embedding
 
 
 def strip_thinking(text: str) -> str:
@@ -177,6 +283,46 @@ def stream_pcm16(audio, sample_rate: int, text: str) -> bytes:
     return (samples * 32767.0).astype("<i2").tobytes()
 
 
+
+@app.post("/speaker-verify")
+async def speaker_verify(request: Request):
+    ref_audio = request.query_params.get("ref_audio", "").strip()
+    try:
+        threshold = float(request.query_params.get("threshold", "0.45"))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid speaker threshold")
+
+    threshold = max(0.0, min(1.0, threshold))
+    if not ref_audio:
+        raise HTTPException(status_code=400, detail="reference audio path is required")
+
+    wav_data = await request.body()
+    samples, sample_rate = read_wav_samples(wav_data)
+    duration = samples.size / float(sample_rate)
+
+    if duration < 0.55:
+        return {
+            "accepted": True,
+            "skipped": True,
+            "reason": "too-short",
+            "duration": duration,
+            "threshold": threshold,
+        }
+
+    with _speaker_lock:
+        reference = reference_speaker_embedding(ref_audio)
+        query = speaker_embedding(samples, sample_rate)
+        score = float(np.dot(reference, query))
+
+    return {
+        "accepted": bool(score >= threshold),
+        "skipped": False,
+        "score": score,
+        "threshold": threshold,
+        "duration": duration,
+    }
+
+
 @app.get("/health")
 def health():
     return {
@@ -184,6 +330,7 @@ def health():
         "translationLoaded": _translation_model is not None,
         "ttsLoaded": _tts_model is not None,
         "cloneLoaded": _clone_model is not None,
+        "speakerVerifierReady": os.path.exists(SPEAKER_MODEL),
     }
 
 
