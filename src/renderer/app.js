@@ -88,6 +88,9 @@ async function loadSettings() {
   $('englishTranslationMode').value = settings.englishTranslationMode || 'fast';
   $('ttsEngine').value = settings.ttsEngine || 'aivis';
   $('cloneStyle').value = settings.cloneStyle || 'natural';
+  $('expressiveDeliveryEnabled').checked = settings.expressiveDeliveryEnabled === true;
+  $('discordOutputGainPercent').value = settings.discordOutputGainPercent ?? 100;
+  $('discordOutputGainLabel').textContent = (settings.discordOutputGainPercent ?? 100) + '%';
   $('qwenVoice').value = settings.qwenVoice || 'Ryan';
   $('speakerVerificationEnabled').checked = settings.speakerVerificationEnabled !== false;
   $('speakerVerificationThreshold').value = settings.speakerVerificationThreshold ?? 0.45;
@@ -109,6 +112,8 @@ async function saveSettings() {
     whisperLanguage: $('inputLanguage').value,
     ttsEngine: $('ttsEngine').value,
     cloneStyle: $('cloneStyle').value,
+    expressiveDeliveryEnabled: $('expressiveDeliveryEnabled').checked,
+    discordOutputGainPercent: Number($('discordOutputGainPercent').value || 100),
     qwenVoice: $('qwenVoice').value,
     aivisSpeakerId: $('speakerId').value,
     speakerVerificationEnabled: $('speakerVerificationEnabled').checked,
@@ -133,6 +138,8 @@ async function saveLiveVoiceSettings() {
     whisperLanguage: $('inputLanguage').value,
     ttsEngine: $('ttsEngine').value,
     cloneStyle: $('cloneStyle').value,
+    expressiveDeliveryEnabled: $('expressiveDeliveryEnabled').checked,
+    discordOutputGainPercent: Number($('discordOutputGainPercent').value || 100),
     qwenVoice: $('qwenVoice').value,
     aivisSpeakerId: $('speakerId').value,
     speakerVerificationEnabled: $('speakerVerificationEnabled').checked,
@@ -814,7 +821,7 @@ $('ttsEngine')?.addEventListener('change', async () => {
   }
 });
 
-for (const id of ['inputLanguage', 'outputLanguage', 'englishTranslationMode', 'cloneStyle', 'qwenVoice', 'speakerId', 'speakerVerificationEnabled', 'speakerVerificationThreshold', 'adaptiveEndpointEnabled']) {
+for (const id of ['inputLanguage', 'outputLanguage', 'englishTranslationMode', 'cloneStyle', 'expressiveDeliveryEnabled', 'qwenVoice', 'speakerId', 'speakerVerificationEnabled', 'speakerVerificationThreshold', 'adaptiveEndpointEnabled']) {
   $(id)?.addEventListener('change', async () => {
     try { await saveLiveVoiceSettings(); }
     catch (err) { log('Could not save voice route: ' + err.message, 'error'); }
@@ -828,6 +835,24 @@ $('speechSilenceMs')?.addEventListener('change', async () => {
     log('Maximum endpoint pause set to ' + speechSilenceMs + ' ms.', 'ok');
   } catch (err) {
     log('Could not save endpoint timing: ' + err.message, 'error');
+  }
+});
+
+$('discordOutputGainPercent')?.addEventListener('input', () => {
+  $('discordOutputGainLabel').textContent = $('discordOutputGainPercent').value + '%';
+});
+
+$('discordOutputGainPercent')?.addEventListener('change', async () => {
+  try {
+    const discordOutputGainPercent = Math.max(
+      0,
+      Math.min(400, Number($('discordOutputGainPercent').value || 100))
+    );
+    settings = await window.voiceBridge.saveSettings({ discordOutputGainPercent });
+    $('discordOutputGainLabel').textContent = discordOutputGainPercent + '%';
+    log('Discord output volume set to ' + discordOutputGainPercent + '%.', 'ok');
+  } catch (err) {
+    log('Could not save Discord output volume: ' + err.message, 'error');
   }
 });
 
