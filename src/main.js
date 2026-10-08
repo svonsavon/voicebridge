@@ -323,6 +323,19 @@ function registerIpc() {
     if (effectiveMuted()) return { skipped: 'muted' };
     if (!whisperReady) return { skipped: 'whisper-not-ready' };
 
+    const evidence = prosody || {};
+    const voicedMs = Number(evidence.voicedMs || 0);
+    const voicedRatio = Number(evidence.voicedRatio || 0);
+    const snrDb = Number(evidence.snrDb || 0);
+    if (
+      (voicedMs > 0 && voicedMs < 180) ||
+      (voicedRatio > 0 && voicedRatio < 0.22) ||
+      (snrDb !== 0 && snrDb < 5.5)
+    ) {
+      status('Ignored weak audio before transcription.', 'info');
+      return { skipped: 'weak-audio' };
+    }
+
     // Serialize utterances so transcription/TTS preserves conversational order.
     const task = processing.then(async () => {
       if (effectiveMuted()) return { skipped: 'muted' };
