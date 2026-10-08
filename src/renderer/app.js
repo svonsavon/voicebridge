@@ -30,6 +30,7 @@ let utteranceNoiseFloor = 0.0015;
 let hesitationCount = 0;
 let longestPauseMs = 0;
 let bargeInAttempted = false;
+let bargeInPromise = null;
 let pcmFramesSeen = 0;
 let processedFramesSeen = 0;
 let remoteMuted = false;
@@ -259,6 +260,7 @@ function resetUtterance() {
   hesitationCount = 0;
   longestPauseMs = 0;
   bargeInAttempted = false;
+  bargeInPromise = null;
 }
 
 function rmsOf(samples) {
@@ -311,6 +313,7 @@ async function finalizeUtterance() {
   const baseline = Math.max(0.0001, utteranceNoiseFloor);
   const snrDb = 20 * Math.log10(Math.max(avgRms, 0.0001) / baseline);
   const voicedRatio = durationMs > 0 ? actualVoicedMs / durationMs : 0;
+  const pendingBargeIn = bargeInPromise;
   resetUtterance();
 
   const minimum = Number(settings.speechMinMs || 280);
@@ -338,6 +341,14 @@ async function finalizeUtterance() {
   const pcm = flatten(utteranceChunks);
   const wav = encodeWav(pcm, captureSampleRate || 48000);
   try {
+    // If this utterance triggered barge-in, let that verification finish
+    // before submitting the utterance. Otherwise the successful barge-in can
+    // advance the turn epoch after this request has already been tagged,
+    // accidentally making the new sentence stale.
+    if (pendingBargeIn) {
+      try { await pendingBargeIn; } catch {}
+    }
+
     await window.voiceBridge.processUtterance(wav, {
       durationMs,
       voicedMs: actualVoicedMs,
@@ -363,18 +374,24 @@ async function maybeBargeIn() {
 
   bargeInAttempted = true;
 
-  try {
-    const pcm = flatten(chunks);
-    if (!pcm.length) return;
-    const wav = encodeWav(pcm, captureSampleRate || 48000);
-    const result = await window.voiceBridge.bargeIn(wav);
+  bargeInPromise = (async () => {
+    try {
+      const pcm = flatten(chunks);
+      if (!pcm.length) return { interrupted: false, reason: 'no-audio' };
+      const wav = encodeWav(pcm, captureSampleRate || 48000);
+      const result = await window.voiceBridge.bargeIn(wav);
 
-    if (result?.interrupted) {
-      log('Barge-in accepted — current VoiceBridge speech stopped.', 'ok');
+      if (result?.interrupted) {
+        log('Barge-in accepted — current VoiceBridge speech stopped.', 'ok');
+      }
+      return result;
+    } catch (err) {
+      log('Barge-in check failed: ' + err.message, 'warn');
+      return { interrupted: false, reason: 'error' };
     }
-  } catch (err) {
-    log('Barge-in check failed: ' + err.message, 'warn');
-  }
+  })();
+
+  return bargeInPromise;
 }
 
 function adaptiveSilenceTargetMs() {
