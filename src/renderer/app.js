@@ -78,6 +78,7 @@ async function loadSettings() {
   if ($('microphoneDevice')) $('microphoneDevice').value = settings.microphoneDeviceId || '';
   $('inputLanguage').value = settings.inputLanguage || settings.whisperLanguage || 'en';
   $('outputLanguage').value = settings.outputLanguage || 'same';
+  $('englishTranslationMode').value = settings.englishTranslationMode || 'fast';
   $('ttsEngine').value = settings.ttsEngine || 'aivis';
   $('qwenVoice').value = settings.qwenVoice || 'Ryan';
   $('speechSilenceMs').value = settings.speechSilenceMs || 650;
@@ -93,6 +94,7 @@ async function saveSettings() {
     microphoneDeviceId: $('microphoneDevice')?.value || '',
     inputLanguage: $('inputLanguage').value,
     outputLanguage: $('outputLanguage').value,
+    englishTranslationMode: $('englishTranslationMode').value,
     whisperLanguage: $('inputLanguage').value,
     ttsEngine: $('ttsEngine').value,
     qwenVoice: $('qwenVoice').value,
@@ -112,6 +114,7 @@ async function saveLiveVoiceSettings() {
   const patch = {
     inputLanguage: $('inputLanguage').value,
     outputLanguage: $('outputLanguage').value,
+    englishTranslationMode: $('englishTranslationMode').value,
     whisperLanguage: $('inputLanguage').value,
     ttsEngine: $('ttsEngine').value,
     qwenVoice: $('qwenVoice').value,
@@ -659,7 +662,7 @@ $('ttsEngine')?.addEventListener('change', async () => {
   }
 });
 
-for (const id of ['inputLanguage', 'outputLanguage', 'qwenVoice', 'speakerId']) {
+for (const id of ['inputLanguage', 'outputLanguage', 'englishTranslationMode', 'qwenVoice', 'speakerId']) {
   $(id)?.addEventListener('change', async () => {
     try { await saveLiveVoiceSettings(); }
     catch (err) { log('Could not save voice route: ' + err.message, 'error'); }
