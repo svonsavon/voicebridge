@@ -87,6 +87,7 @@ async function loadSettings() {
   $('outputLanguage').value = settings.outputLanguage || 'same';
   $('englishTranslationMode').value = settings.englishTranslationMode || 'fast';
   $('ttsEngine').value = settings.ttsEngine || 'aivis';
+  $('cloneStyle').value = settings.cloneStyle || 'natural';
   $('qwenVoice').value = settings.qwenVoice || 'Ryan';
   $('speakerVerificationEnabled').checked = settings.speakerVerificationEnabled !== false;
   $('speakerVerificationThreshold').value = settings.speakerVerificationThreshold ?? 0.45;
@@ -107,6 +108,7 @@ async function saveSettings() {
     englishTranslationMode: $('englishTranslationMode').value,
     whisperLanguage: $('inputLanguage').value,
     ttsEngine: $('ttsEngine').value,
+    cloneStyle: $('cloneStyle').value,
     qwenVoice: $('qwenVoice').value,
     aivisSpeakerId: $('speakerId').value,
     speakerVerificationEnabled: $('speakerVerificationEnabled').checked,
@@ -130,6 +132,7 @@ async function saveLiveVoiceSettings() {
     englishTranslationMode: $('englishTranslationMode').value,
     whisperLanguage: $('inputLanguage').value,
     ttsEngine: $('ttsEngine').value,
+    cloneStyle: $('cloneStyle').value,
     qwenVoice: $('qwenVoice').value,
     aivisSpeakerId: $('speakerId').value,
     speakerVerificationEnabled: $('speakerVerificationEnabled').checked,
@@ -811,7 +814,7 @@ $('ttsEngine')?.addEventListener('change', async () => {
   }
 });
 
-for (const id of ['inputLanguage', 'outputLanguage', 'englishTranslationMode', 'qwenVoice', 'speakerId', 'speakerVerificationEnabled', 'speakerVerificationThreshold', 'adaptiveEndpointEnabled']) {
+for (const id of ['inputLanguage', 'outputLanguage', 'englishTranslationMode', 'cloneStyle', 'qwenVoice', 'speakerId', 'speakerVerificationEnabled', 'speakerVerificationThreshold', 'adaptiveEndpointEnabled']) {
   $(id)?.addEventListener('change', async () => {
     try { await saveLiveVoiceSettings(); }
     catch (err) { log('Could not save voice route: ' + err.message, 'error'); }
