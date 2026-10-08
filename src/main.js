@@ -27,6 +27,8 @@ let whisperReady = false;
 let processing = Promise.resolve();
 let cloneWarmup = null;
 let cloneWarmKey = '';
+let interactionEpoch = 0;
+let activeTtsCancel = null;
 
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -39,6 +41,10 @@ function status(text, level = 'info') {
 
 function effectiveMuted() {
   return helperMuted || manualMuted;
+}
+
+function turnIsStale(epoch) {
+  return epoch !== interactionEpoch;
 }
 
 function sendMuteState() {
@@ -265,6 +271,20 @@ function registerIpc() {
     };
   });
 
+  ipcMain.handle('speech:barge-in', async () => {
+    interactionEpoch += 1;
+
+    try { activeTtsCancel?.('barge-in'); } catch {}
+    activeTtsCancel = null;
+
+    const interrupted = discordVoice.interrupt();
+    if (interrupted) {
+      status('Barge-in: stopped current VoiceBridge speech and cleared stale audio.', 'ok');
+    }
+
+    return { ok: true, epoch: interactionEpoch, interrupted };
+  });
+
   ipcMain.handle('tts:list-voices', async () => aivis.getSpeakers());
   ipcMain.handle('tts:launch-aivis', async () => aivis.launchAivis());
 
@@ -320,6 +340,7 @@ function registerIpc() {
   });
 
   ipcMain.handle('speech:process', async (_, { wavBytes, prosody }) => {
+    const turnEpoch = interactionEpoch;
     if (effectiveMuted()) return { skipped: 'muted' };
     if (!whisperReady) return { skipped: 'whisper-not-ready' };
 
@@ -339,6 +360,7 @@ function registerIpc() {
     // Serialize utterances so transcription/TTS preserves conversational order.
     const task = processing.then(async () => {
       if (effectiveMuted()) return { skipped: 'muted' };
+      if (turnIsStale(turnEpoch)) return { skipped: 'stale-turn' };
       const settings = loadSettings({ includeToken: true });
 
       if (settings.speakerVerificationEnabled !== false && voicedMs >= 550) {
@@ -391,6 +413,8 @@ function registerIpc() {
         }
       }
 
+      if (turnIsStale(turnEpoch)) return { skipped: 'stale-turn' };
+
       const inputLanguage = settings.inputLanguage || settings.whisperLanguage || 'en';
       const outputLanguage = settings.outputLanguage || 'same';
       const englishTranslationMode = settings.englishTranslationMode || 'fast';
@@ -418,6 +442,8 @@ function registerIpc() {
         ' s.',
         'info'
       );
+
+      if (turnIsStale(turnEpoch)) return { skipped: 'stale-turn' };
 
       const filtered = cleanTranscript(rawText);
       if (filtered.removed.length) {
@@ -454,6 +480,7 @@ function registerIpc() {
           request.source,
           request.target
         );
+        if (turnIsStale(turnEpoch)) return { skipped: 'stale-turn' };
         translated = spokenText !== originalText;
         status('Translation: ' + ((Date.now() - translationStarted) / 1000).toFixed(2) + ' s.', 'info');
         status(`${request.target}: ${spokenText}`, 'translation');
@@ -493,6 +520,7 @@ function registerIpc() {
           language: selectedOutputLanguage(settings),
           refAudio: profile.audioPath,
           refText: profile.refText,
+          timeoutMs: 20_000,
           onFirstAudio: () => {
             if (firstAudioLogged) return;
             firstAudioLogged = true;
@@ -507,6 +535,12 @@ function registerIpc() {
           }
         });
 
+        if (turnIsStale(turnEpoch)) {
+          streamed.cancel?.('stale-turn');
+          return { skipped: 'stale-turn' };
+        }
+
+        activeTtsCancel = streamed.cancel;
         discordVoice.enqueuePcmStream(streamed.stream, {
           sampleRate: streamed.sampleRate,
           channels: streamed.channels
@@ -516,9 +550,16 @@ function registerIpc() {
         try {
           await streamed.completed;
         } catch (err) {
+          if (turnIsStale(turnEpoch)) {
+            return { skipped: 'barge-in' };
+          }
           status('My Voice stream ended unexpectedly: ' + (err.message || String(err)), 'error');
           throw err;
+        } finally {
+          if (activeTtsCancel === streamed.cancel) activeTtsCancel = null;
         }
+
+        if (turnIsStale(turnEpoch)) return { skipped: 'barge-in' };
 
         status(
           'TTS stream generation: ' +
@@ -537,6 +578,10 @@ function registerIpc() {
       }
 
       const tts = await synthesizeSelected(spokenText, settings, prosody || {});
+      if (turnIsStale(turnEpoch)) {
+        status('Dropped stale synthesized speech.', 'info');
+        return { skipped: 'stale-turn' };
+      }
       status(
         'TTS: ' + ((Date.now() - ttsStarted) / 1000).toFixed(2) +
         ' s. Total after phrase end: ' + ((Date.now() - utteranceStarted) / 1000).toFixed(2) + ' s.',
