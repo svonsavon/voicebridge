@@ -13,6 +13,8 @@ const defaults = {
   ttsEngine: 'aivis',
   aivisSpeakerId: '',
   qwenVoice: 'Ryan',
+  speakerVerificationEnabled: true,
+  speakerVerificationThreshold: 0.45,
   speechSilenceMs: 650,
   speechMinMs: 280,
   speechMaxMs: 12000,
