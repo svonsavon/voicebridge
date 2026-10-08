@@ -42,6 +42,8 @@ _tts_model = None
 _clone_model = None
 _speaker_extractor = None
 _speaker_reference_cache = {}
+_tts_cancel_events = {}
+_tts_cancel_lock = threading.Lock()
 _translation_lock = threading.Lock()
 _tts_lock = threading.Lock()
 _clone_lock = threading.Lock()
@@ -66,12 +68,44 @@ class CloneTTSRequest(BaseModel):
     ref_audio: str
     ref_text: str
     naturalize: bool = True
+    request_id: str = ""
 
 
 class PrepareCloneRequest(BaseModel):
     ref_audio: str
     ref_text: str
     naturalize: bool = True
+
+
+class CancelTTSRequest(BaseModel):
+    request_id: str
+
+
+def register_tts_cancel(request_id: str):
+    event = threading.Event()
+    if request_id:
+        with _tts_cancel_lock:
+            _tts_cancel_events[request_id] = event
+    return event
+
+
+def cancel_tts_request(request_id: str):
+    if not request_id:
+        return False
+    with _tts_cancel_lock:
+        event = _tts_cancel_events.get(request_id)
+    if event is None:
+        return False
+    event.set()
+    return True
+
+
+def clear_tts_cancel(request_id: str, event):
+    if not request_id:
+        return
+    with _tts_cancel_lock:
+        if _tts_cancel_events.get(request_id) is event:
+            _tts_cancel_events.pop(request_id, None)
 
 
 def release_mlx_cache():
@@ -339,6 +373,11 @@ async def speaker_verify(request: Request):
     }
 
 
+@app.post("/tts-cancel")
+def tts_cancel(req: CancelTTSRequest):
+    return {"ok": True, "cancelled": cancel_tts_request(req.request_id)}
+
+
 @app.get("/health")
 def health():
     return {
@@ -493,47 +532,64 @@ def tts_clone_stream(req: CloneTTSRequest):
     max_tokens, max_duration = generation_limits(text)
     sample_rate = 24000
 
+    cancel_event = register_tts_cancel(req.request_id)
+
     def generate_audio():
         total_samples = 0
 
-        with _clone_lock:
-            model = load_clone_tts()
-            model_sample_rate = int(getattr(model, "sample_rate", sample_rate))
+        try:
+            with _clone_lock:
+                if cancel_event.is_set():
+                    return
 
-            try:
-                for result in model.generate(
-                    text=text,
-                    language=req.language or "Auto",
-                    ref_audio=req.ref_audio,
-                    ref_text=None if req.naturalize else ref_text,
-                    max_tokens=max_tokens,
-                    stream=True,
-                    streaming_interval=0.32,
-                ):
-                    audio = np.asarray(result.audio, dtype=np.float32).reshape(-1)
-                    if audio.size == 0:
-                        continue
+                model = load_clone_tts()
+                model_sample_rate = int(getattr(model, "sample_rate", sample_rate))
 
-                    total_samples += int(audio.size)
-                    duration = total_samples / float(model_sample_rate)
-                    if duration > max_duration:
-                        raise RuntimeError(
-                            f"RUNAWAY_AUDIO: streamed {duration:.1f}s "
-                            f"(limit {max_duration:.1f}s)"
-                        )
+                try:
+                    for result in model.generate(
+                        text=text,
+                        language=req.language or "Auto",
+                        ref_audio=req.ref_audio,
+                        ref_text=None if req.naturalize else ref_text,
+                        max_tokens=max_tokens,
+                        stream=True,
+                        streaming_interval=0.32,
+                    ):
+                        if cancel_event.is_set():
+                            print(
+                                "TTS_STREAM_CANCELLED: " + (req.request_id or "anonymous"),
+                                flush=True,
+                            )
+                            break
 
-                    chunk = stream_pcm16(audio, model_sample_rate, text)
-                    if chunk:
-                        yield chunk
-            except Exception as exc:
-                print(
-                    "TTS_STREAM_ERROR: "
-                    + exc.__class__.__name__
-                    + ": "
-                    + str(exc),
-                    flush=True,
-                )
-                raise
+                        audio = np.asarray(result.audio, dtype=np.float32).reshape(-1)
+                        if audio.size == 0:
+                            continue
+
+                        total_samples += int(audio.size)
+                        duration = total_samples / float(model_sample_rate)
+                        if duration > max_duration:
+                            raise RuntimeError(
+                                f"RUNAWAY_AUDIO: streamed {duration:.1f}s "
+                                f"(limit {max_duration:.1f}s)"
+                            )
+
+                        chunk = stream_pcm16(audio, model_sample_rate, text)
+                        if chunk:
+                            yield chunk
+                except Exception as exc:
+                    if cancel_event.is_set():
+                        return
+                    print(
+                        "TTS_STREAM_ERROR: "
+                        + exc.__class__.__name__
+                        + ": "
+                        + str(exc),
+                        flush=True,
+                    )
+                    raise
+        finally:
+            clear_tts_cancel(req.request_id, cancel_event)
 
     return StreamingResponse(
         generate_audio(),
