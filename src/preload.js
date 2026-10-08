@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld('voiceBridge', {
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   requestMicrophone: () => ipcRenderer.invoke('microphone:request'),
+  getVoiceProfile: () => ipcRenderer.invoke('voice:get-profile'),
+  importVoiceProfile: (refText) => ipcRenderer.invoke('voice:import-reference', { refText }),
   processUtterance: (wavBytes, prosody) => ipcRenderer.invoke('speech:process', { wavBytes, prosody }),
   connectDiscord: () => ipcRenderer.invoke('discord:connect'),
   disconnectDiscord: () => ipcRenderer.invoke('discord:disconnect'),
