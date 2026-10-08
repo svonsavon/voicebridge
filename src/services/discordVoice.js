@@ -207,6 +207,10 @@ function enqueue(wavBuffer) {
     );
   }
 
+  if (queue.length >= 2) {
+    queue.splice(0, queue.length - 1);
+    onStatus({ level: 'warn', text: 'Dropped stale queued speech.' });
+  }
   queue.push({ type: 'wav', wav });
   playNext();
 }
@@ -215,6 +219,14 @@ function enqueuePcmStream(stream, { sampleRate = 24000, channels = 1 } = {}) {
   if (!connection || !player) throw new Error('Discord is not connected.');
   if (!stream || typeof stream.pipe !== 'function') {
     throw new Error('Streaming TTS did not provide a readable PCM stream.');
+  }
+
+  if (queue.length >= 2) {
+    const stale = queue.splice(0, queue.length - 1);
+    for (const item of stale) {
+      try { item?.stream?.destroy?.(); } catch {}
+    }
+    onStatus({ level: 'warn', text: 'Dropped stale queued speech.' });
   }
 
   queue.push({
@@ -246,14 +258,24 @@ function playNext() {
   player.play(resource);
 }
 
-async function disconnect() {
+function interrupt() {
+  const hadAudio = playing || queue.length > 0 || !!currentFfmpeg || !!currentSource;
   queue = [];
   playing = false;
+
   try { currentSource?.destroy?.(); } catch {}
   currentSource = null;
+
   try { currentFfmpeg?.kill('SIGKILL'); } catch {}
   currentFfmpeg = null;
+
   try { player?.stop(true); } catch {}
+
+  return hadAudio;
+}
+
+async function disconnect() {
+  interrupt();
   try { connection?.destroy(); } catch {}
   connection = null;
   player = null;
@@ -267,4 +289,11 @@ function isConnected() {
   return !!connection && connection.state?.status === VoiceConnectionStatus.Ready;
 }
 
-module.exports = { connect, disconnect, enqueue, enqueuePcmStream, isConnected };
+module.exports = {
+  connect,
+  disconnect,
+  interrupt,
+  enqueue,
+  enqueuePcmStream,
+  isConnected
+};
