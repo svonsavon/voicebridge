@@ -6,13 +6,15 @@ const {
   BrowserWindow,
   ipcMain,
   systemPreferences,
-  shell
+  shell,
+  dialog
 } = require('electron');
 const { loadSettings, saveSettings } = require('./services/settings');
 const whisper = require('./services/whisper');
 const { cleanTranscript } = require('./services/speechFilter');
 const qwenRuntime = require('./services/qwenRuntime');
 const languageRouter = require('./services/languageRouter');
+const voiceProfile = require('./services/voiceProfile');
 const aivis = require('./services/aivis');
 const discordVoice = require('./services/discordVoice');
 const updater = require('./services/updater');
@@ -116,6 +118,20 @@ function selectedOutputLanguage(settings) {
 
 async function synthesizeSelected(text, settings, prosody = {}) {
   const engine = settings.ttsEngine || 'aivis';
+
+  if (engine === 'clone') {
+    const profile = voiceProfile.getProfile();
+    if (!profile.configured) {
+      throw new Error('My Voice is selected, but no reference voice has been configured yet.');
+    }
+    await ensureQwenReady();
+    return qwenRuntime.synthesizeClone(text, {
+      language: selectedOutputLanguage(settings),
+      refAudio: profile.audioPath,
+      refText: profile.refText
+    });
+  }
+
   if (engine === 'qwen') {
     await ensureQwenReady();
     return qwenRuntime.synthesize(text, {
@@ -123,6 +139,7 @@ async function synthesizeSelected(text, settings, prosody = {}) {
       voice: settings.qwenVoice || 'Ryan'
     });
   }
+
   return aivis.synthesize(text, settings.aivisSpeakerId, prosody || {});
 }
 
@@ -149,6 +166,28 @@ function registerIpc() {
     return systemPreferences.askForMediaAccess('microphone');
   });
 
+  ipcMain.handle('voice:get-profile', async () => voiceProfile.getProfile());
+
+  ipcMain.handle('voice:import-reference', async (_, { refText } = {}) => {
+    const transcript = String(refText || '').trim();
+    if (!transcript) throw new Error('Enter the exact transcript of your recording first.');
+
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Choose your voice reference recording',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Audio', extensions: ['wav', 'mp3', 'm4a', 'aiff', 'aif', 'flac'] }
+      ]
+    });
+
+    if (result.canceled || !result.filePaths?.[0]) return { canceled: true };
+
+    status('Preparing personal voice reference…', 'busy');
+    const profile = await voiceProfile.importReference(result.filePaths[0], transcript);
+    status('My Voice reference saved locally.', 'ok');
+    return profile;
+  });
+
   ipcMain.handle('mute:set-manual', (_, muted) => {
     manualMuted = !!muted;
     sendMuteState();
@@ -172,7 +211,9 @@ function registerIpc() {
       Auto: 'VoiceBridge is ready.'
     };
     const testText = String(text || defaultTests[outputLanguage] || defaultTests.English);
-    if ((settings.ttsEngine || 'aivis') === 'qwen') {
+    if ((settings.ttsEngine || 'aivis') === 'clone') {
+      status('Test voice: My Voice clone (' + outputLanguage + ').', 'info');
+    } else if ((settings.ttsEngine || 'aivis') === 'qwen') {
       status(
         'Test voice: Qwen multilingual — ' +
         (settings.qwenVoice || 'Ryan') +
@@ -258,7 +299,14 @@ function registerIpc() {
         status(`${request.target}: ${spokenText}`, 'translation');
       }
 
-      if ((settings.ttsEngine || 'aivis') === 'qwen') {
+      if ((settings.ttsEngine || 'aivis') === 'clone') {
+        status(
+          'TTS engine: My Voice clone (' +
+          selectedOutputLanguage(settings) +
+          ').',
+          'info'
+        );
+      } else if ((settings.ttsEngine || 'aivis') === 'qwen') {
         status(
           'TTS engine: Qwen multilingual — ' +
           (settings.qwenVoice || 'Ryan') +
