@@ -22,6 +22,19 @@ if [[ -d "$QWEN_ROOT" && -f "runtime/qwen_server.py" ]]; then
   echo "Synced local Qwen runtime server."
 fi
 
+WHISPER_MODELS="$HOME/Library/Application Support/VoiceBridge/runtime/models"
+VAD_MODEL="$WHISPER_MODELS/ggml-silero-v6.2.0.bin"
+if [[ -d "$WHISPER_MODELS" && ! -f "$VAD_MODEL" ]]; then
+  echo "Downloading tiny Silero VAD model for speech-only triggering..."
+  if curl -L --fail --retry 2     "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin"     -o "$VAD_MODEL.tmp"; then
+    mv "$VAD_MODEL.tmp" "$VAD_MODEL"
+    echo "Installed Silero VAD model."
+  else
+    rm -f "$VAD_MODEL.tmp"
+    echo "Warning: Silero VAD download failed; VoiceBridge will use its front-end gate only."
+  fi
+fi
+
 # A locally built app does not require an Apple Developer signing identity.
 export CSC_IDENTITY_AUTO_DISCOVERY=false
 npx electron-builder --mac --arm64
