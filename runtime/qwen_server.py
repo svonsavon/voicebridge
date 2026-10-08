@@ -5,6 +5,7 @@ import io
 import os
 import re
 import threading
+import time
 import wave
 
 import numpy as np
@@ -536,12 +537,23 @@ def tts_clone_stream(req: CloneTTSRequest):
 
     def generate_audio():
         total_samples = 0
+        queued_at = time.monotonic()
+        first_chunk_logged = False
 
         try:
             with _clone_lock:
+                lock_wait = time.monotonic() - queued_at
+                if lock_wait >= 0.25:
+                    print(
+                        f"TTS_STREAM_LOCK_WAIT: {lock_wait:.2f}s "
+                        f"id={req.request_id or 'anonymous'}",
+                        flush=True,
+                    )
+
                 if cancel_event.is_set():
                     return
 
+                generation_started = time.monotonic()
                 model = load_clone_tts()
                 model_sample_rate = int(getattr(model, "sample_rate", sample_rate))
 
@@ -576,6 +588,14 @@ def tts_clone_stream(req: CloneTTSRequest):
 
                         chunk = stream_pcm16(audio, model_sample_rate, text)
                         if chunk:
+                            if not first_chunk_logged:
+                                first_chunk_logged = True
+                                print(
+                                    "TTS_STREAM_FIRST_CHUNK: "
+                                    f"{time.monotonic() - generation_started:.2f}s "
+                                    f"id={req.request_id or 'anonymous'}",
+                                    flush=True,
+                                )
                             yield chunk
                 except Exception as exc:
                     if cancel_event.is_set():
