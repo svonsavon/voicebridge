@@ -574,7 +574,6 @@ function registerIpc() {
           language: selectedOutputLanguage(settings),
           refAudio: profile.audioPath,
           refText: profile.refText,
-          timeoutMs: 20_000,
           onFirstAudio: () => {
             if (firstAudioLogged) return;
             firstAudioLogged = true;
