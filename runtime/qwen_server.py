@@ -9,7 +9,7 @@ import wave
 import numpy as np
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 TRANSLATION_MODEL = "Qwen/Qwen3-0.6B-MLX-4bit"
@@ -161,6 +161,20 @@ def wav_bytes(audio, sample_rate: int, text: str = "", token_count: int = 0, max
     samples = validate_generated_audio(audio, sample_rate, text, token_count, max_tokens)
     samples = np.clip(samples, -1.0, 1.0)
     pcm = (samples * 32767.0).astype("<i2").tobytes()
+    out = io.BytesIO()
+    with wave.open(out, "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(int(sample_rate))
+        handle.writeframes(pcm)
+    return out.getvalue()
+
+
+def stream_pcm16(audio, sample_rate: int, text: str) -> bytes:
+    # Per-chunk safety. Total duration is enforced by the stream endpoint.
+    samples = validate_generated_audio(audio, sample_rate, text, 0, 0)
+    samples = np.clip(samples, -1.0, 1.0)
+    return (samples * 32767.0).astype("<i2").tobytes()
 
     out = io.BytesIO()
     with wave.open(out, "wb") as handle:
@@ -303,6 +317,61 @@ def prepare_clone(req: PrepareCloneRequest):
 
     return {"ok": True}
 
+
+
+@app.post("/tts-clone-stream")
+def tts_clone_stream(req: CloneTTSRequest):
+    text = req.text.strip()
+    ref_text = req.ref_text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+    if not ref_text:
+        raise HTTPException(status_code=400, detail="reference transcript is required")
+    if not req.ref_audio:
+        raise HTTPException(status_code=400, detail="reference audio path is required")
+
+    max_tokens, max_duration = generation_limits(text)
+    sample_rate = 24000
+
+    def generate_audio():
+        total_samples = 0
+
+        with _clone_lock:
+            model = load_clone_tts()
+            model_sample_rate = int(getattr(model, "sample_rate", sample_rate))
+
+            for result in model.generate(
+                text=text,
+                language=req.language or "Auto",
+                ref_audio=req.ref_audio,
+                ref_text=ref_text,
+                max_tokens=max_tokens,
+                stream=True,
+                streaming_interval=0.32,
+            ):
+                audio = np.asarray(result.audio, dtype=np.float32).reshape(-1)
+                if audio.size == 0:
+                    continue
+
+                total_samples += int(audio.size)
+                duration = total_samples / float(model_sample_rate)
+                if duration > max_duration:
+                    raise RuntimeError(
+                        f"RUNAWAY_AUDIO: streamed {duration:.1f}s "
+                        f"(limit {max_duration:.1f}s)"
+                    )
+
+                yield stream_pcm16(audio, model_sample_rate, text)
+
+    return StreamingResponse(
+        generate_audio(),
+        media_type="application/octet-stream",
+        headers={
+            "X-VoiceBridge-Format": "s16le",
+            "X-VoiceBridge-Sample-Rate": str(sample_rate),
+            "X-VoiceBridge-Channels": "1",
+        },
+    )
 
 @app.post("/tts-clone")
 def tts_clone(req: CloneTTSRequest):
