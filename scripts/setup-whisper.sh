@@ -40,7 +40,15 @@ if [[ ! -f "$MODELS/ggml-small.bin" ]]; then
   bash "$SRC/models/download-ggml-model.sh" small "$MODELS"
 fi
 
+VAD_MODEL="$MODELS/ggml-silero-v6.2.0.bin"
+if [[ ! -f "$VAD_MODEL" ]]; then
+  echo "Downloading Silero VAD model..."
+  curl -L --fail --retry 2     "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin"     -o "$VAD_MODEL.tmp"
+  mv "$VAD_MODEL.tmp" "$VAD_MODEL"
+fi
+
 echo
 echo "Whisper installed entirely locally at:"
 echo "  $ROOT"
 echo "Model: $MODELS/ggml-small.bin"
+echo "VAD:   $MODELS/ggml-silero-v6.2.0.bin"
