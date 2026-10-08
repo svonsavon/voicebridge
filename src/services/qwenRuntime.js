@@ -206,9 +206,18 @@ async function synthesizeCloneStream(
   let first = true;
   let resolveDone;
   let rejectDone;
+  let completedSettled = false;
   const completed = new Promise((resolve, reject) => {
-    resolveDone = resolve;
-    rejectDone = reject;
+    resolveDone = () => {
+      if (completedSettled) return;
+      completedSettled = true;
+      resolve();
+    };
+    rejectDone = (err) => {
+      if (completedSettled) return;
+      completedSettled = true;
+      reject(err);
+    };
   });
 
   async function* chunks() {
@@ -237,9 +246,12 @@ async function synthesizeCloneStream(
 
   const cancel = (reason = 'interrupted') => {
     clearTimeout(timeout);
-    try { controller.abort(new Error(reason)); } catch {}
+    const err = new Error(reason);
+    err.code = 'VOICEBRIDGE_INTERRUPTED';
+    rejectDone(err);
+    try { controller.abort(err); } catch {}
     try { reader.cancel(reason); } catch {}
-    try { stream.destroy(); } catch {}
+    try { stream.destroy(err); } catch {}
   };
 
   return {
