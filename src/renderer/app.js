@@ -143,6 +143,15 @@ function updateVoiceEngineUi() {
   if (clone) clone.classList.toggle('hidden', engine !== 'clone');
 }
 
+async function warmMyVoice() {
+  if (!window.voiceBridge.prepareVoiceClone) return;
+  try {
+    await window.voiceBridge.prepareVoiceClone();
+  } catch (err) {
+    log('My Voice warm-up failed: ' + err.message, 'warn');
+  }
+}
+
 async function refreshVoiceProfile() {
   const status = $('voiceProfileStatus');
   if (!status || !window.voiceBridge.getVoiceProfile) return;
@@ -603,6 +612,7 @@ $('voiceReferenceText')?.addEventListener('change', async () => {
       $('ttsEngine').value = 'clone';
       updateVoiceEngineUi();
       await saveLiveVoiceSettings();
+      await warmMyVoice();
       log('Personal voice reference is ready.', 'ok');
     }
   } catch (err) {
@@ -615,10 +625,6 @@ $('voiceReferenceText')?.addEventListener('change', async () => {
 
 $('chooseVoiceSample')?.addEventListener('click', async () => {
   const refText = $('voiceReferenceText')?.value?.trim() || '';
-  if (!refText) {
-    log('Type the exact transcript of your reference recording first.', 'warn');
-    return;
-  }
 
   try {
     const profile = await window.voiceBridge.importVoiceProfile(refText);
@@ -630,6 +636,7 @@ $('chooseVoiceSample')?.addEventListener('click', async () => {
       $('ttsEngine').value = 'clone';
       updateVoiceEngineUi();
       await saveLiveVoiceSettings();
+      await warmMyVoice();
       log('Personal voice reference is ready.', 'ok');
     } else {
       $('voiceProfileStatus').textContent = 'Recording selected — add transcript';
@@ -644,8 +651,12 @@ $('chooseVoiceSample')?.addEventListener('click', async () => {
 
 $('ttsEngine')?.addEventListener('change', async () => {
   updateVoiceEngineUi();
-  try { await saveLiveVoiceSettings(); }
-  catch (err) { log('Could not save voice engine: ' + err.message, 'error'); }
+  try {
+    await saveLiveVoiceSettings();
+    if ($('ttsEngine').value === 'clone') await warmMyVoice();
+  } catch (err) {
+    log('Could not save voice engine: ' + err.message, 'error');
+  }
 });
 
 for (const id of ['inputLanguage', 'outputLanguage', 'qwenVoice', 'speakerId']) {
@@ -711,6 +722,7 @@ navigator.mediaDevices?.addEventListener?.('devicechange', () => {
   updateMuteUi(state);
   updateVoiceEngineUi();
   await refreshVoiceProfile();
+  if ($('ttsEngine')?.value === 'clone') warmMyVoice();
   await refreshVoices();
 })();
 
