@@ -271,7 +271,56 @@ function registerIpc() {
     };
   });
 
-  ipcMain.handle('speech:barge-in', async () => {
+  ipcMain.handle('speech:barge-in', async (_, { wavBytes } = {}) => {
+    const hasActiveSpeech = discordVoice.hasActiveAudio() || !!activeTtsCancel;
+    if (!hasActiveSpeech) {
+      return { ok: true, interrupted: false, reason: 'idle' };
+    }
+
+    const settings = loadSettings({ includeToken: true });
+
+    if (settings.speakerVerificationEnabled !== false) {
+      const profile = voiceProfile.getProfile();
+      if (!profile.configured || !wavBytes?.length) {
+        return { ok: true, interrupted: false, reason: 'speaker-unverified' };
+      }
+
+      try {
+        await ensureQwenReady();
+        const threshold = Math.max(
+          0.30,
+          Math.min(0.75, Number(settings.speakerVerificationThreshold ?? 0.45))
+        );
+        const verification = await qwenRuntime.verifySpeaker(wavBytes, {
+          refAudio: profile.audioPath,
+          threshold
+        });
+
+        if (!verification.accepted || verification.skipped) {
+          return {
+            ok: true,
+            interrupted: false,
+            reason: verification.skipped ? 'speaker-too-short' : 'speaker-mismatch',
+            speakerScore: verification.score
+          };
+        }
+
+        status(
+          'Barge-in speaker match: ' +
+          Number(verification.score || 0).toFixed(3) +
+          ' ✓',
+          'info'
+        );
+      } catch (err) {
+        status(
+          'Barge-in verification failed; keeping current speech: ' +
+          (err.message || String(err)),
+          'warn'
+        );
+        return { ok: true, interrupted: false, reason: 'verification-error' };
+      }
+    }
+
     interactionEpoch += 1;
 
     try { activeTtsCancel?.('barge-in'); } catch {}
