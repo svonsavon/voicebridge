@@ -12,6 +12,8 @@ const defaults = {
   whisperLanguage: 'en',
   ttsEngine: 'aivis',
   cloneStyle: 'natural',
+  expressiveDeliveryEnabled: false,
+  discordOutputGainPercent: 100,
   aivisSpeakerId: '',
   qwenVoice: 'Ryan',
   speakerVerificationEnabled: true,
